@@ -16,14 +16,149 @@ import (
 	"github.com/aymenkrifa/grove/internal/testutil"
 )
 
-// TestMain lets this binary stand in for git — see standInGit. Re-executed
-// under the name "git" with GROVE_FAKE_GIT_LOG set, it records one call and
-// exits instead of running any test.
+// TestMain lets this binary stand in for git — see standInGit and
+// argvRecordingGit. Re-executed under the name "git" with GROVE_FAKE_GIT_LOG
+// or GROVE_FAKE_GIT_ARGV set, it records one call and exits instead of running
+// any test.
 func TestMain(m *testing.M) {
+	if log := os.Getenv("GROVE_FAKE_GIT_ARGV"); log != "" {
+		os.Exit(recordArgv(log))
+	}
 	if log := os.Getenv("GROVE_FAKE_GIT_LOG"); log != "" {
 		os.Exit(recordCall(log))
 	}
 	os.Exit(m.Run())
+}
+
+// recordArgv appends the argument vector this stand-in git was invoked with,
+// one tab-separated line per call, and exits successfully printing nothing.
+// Empty output parses to an empty Repo, which is all the callers below need:
+// the assertion is about what git was asked to do, not about what it answered.
+func recordArgv(log string) int {
+	f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if _, err := fmt.Fprintln(f, strings.Join(os.Args[1:], "\t")); err != nil {
+		f.Close()
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if err := f.Close(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
+}
+
+// argvRecordingGit puts the argv-recording stand-in on PATH under the name
+// git, and returns a function that reads back the calls it saw.
+func argvRecordingGit(t *testing.T) func() [][]string {
+	t.Helper()
+	log := filepath.Join(t.TempDir(), "argv.log")
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locating the test binary: %v", err)
+	}
+	bin := t.TempDir()
+	if err := os.Symlink(self, filepath.Join(bin, "git")); err != nil {
+		t.Fatalf("linking the stand-in git: %v", err)
+	}
+	t.Setenv("GROVE_FAKE_GIT_ARGV", log)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return func() [][]string {
+		body, err := os.ReadFile(log)
+		if err != nil {
+			t.Fatalf("reading %s: %v", log, err)
+		}
+		var calls [][]string
+		for _, line := range strings.Split(strings.TrimSuffix(string(body), "\n"), "\n") {
+			if line != "" {
+				calls = append(calls, strings.Split(line, "\t"))
+			}
+		}
+		if len(calls) == 0 {
+			t.Fatal("the stand-in git was never called")
+		}
+		return calls
+	}
+}
+
+// TestRunAlwaysPassesNoOptionalLocks is the read-only guarantee's real pin:
+// not "status remembers the flag" but "no caller can leave it out", because
+// Run applies it itself. It is checked at the argv level rather than through
+// an observable effect because most of these calls have no observable effect
+// to check — and because the one command where git ignores the flag (diff,
+// see noOptionalLocks) would otherwise have nothing pinning it at all.
+func TestRunAlwaysPassesNoOptionalLocks(t *testing.T) {
+	dir := t.TempDir()
+	calls := argvRecordingGit(t)
+	for _, args := range [][]string{
+		{"status", "--porcelain=v2", "-z"},
+		{"diff", "--stat"},
+		{"log", "-n", "20"},
+		{"rev-parse", "--git-dir"},
+		{},
+	} {
+		if _, err := Run(context.Background(), dir, args...); err != nil {
+			t.Fatalf("Run(%q) error = %v", args, err)
+		}
+	}
+	got := calls()
+	if len(got) != 5 {
+		t.Fatalf("recorded %d calls, want 5: %q", len(got), got)
+	}
+	for _, argv := range got {
+		if len(argv) == 0 || argv[0] != noOptionalLocks {
+			t.Errorf("git argv = %q, want it to begin with %s", argv, noOptionalLocks)
+		}
+	}
+	// The caller's own arguments must survive the prefix, in order: a Run that
+	// replaced its arguments rather than prefixing them passes the check above.
+	if want := []string{noOptionalLocks, "diff", "--stat"}; !equalStrings(got[1], want) {
+		t.Errorf("git argv = %q, want %q", got[1], want)
+	}
+	if want := []string{noOptionalLocks}; !equalStrings(got[4], want) {
+		t.Errorf("git argv for no arguments = %q, want %q", got[4], want)
+	}
+}
+
+// TestCollectPassesNoOptionalLocksToEveryCall covers the calls collectOne
+// makes on its own account — the bare-repository probe, the detached-HEAD
+// short SHA, the stash count — which no command spells out and which a
+// call-site rule would therefore never have reached.
+func TestCollectPassesNoOptionalLocksToEveryCall(t *testing.T) {
+	root := t.TempDir()
+	var found []discover.Found
+	for _, name := range []string{"a", "b"} {
+		dir := filepath.Join(root, name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		found = append(found, discover.Found{AbsPath: dir, RelPath: name})
+	}
+	calls := argvRecordingGit(t)
+
+	Collect(context.Background(), found, CollectOpts{Jobs: 2, Stash: true})
+
+	for _, argv := range calls() {
+		if len(argv) == 0 || argv[0] != noOptionalLocks {
+			t.Errorf("git argv = %q, want it to begin with %s", argv, noOptionalLocks)
+		}
+	}
+}
+
+func equalStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // recordCall is the whole of the stand-in git: two timestamps bracketing a

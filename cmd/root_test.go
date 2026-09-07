@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aymenkrifa/grove/internal/config"
 	"github.com/aymenkrifa/grove/internal/git"
@@ -876,5 +878,88 @@ func TestStatusBadConfigExitsOne(t *testing.T) {
 	}
 	if stdout != "" {
 		t.Errorf("stdout should be empty:\n%s", stdout)
+	}
+}
+
+// backdate rewinds path's access and modification times, so the stat data the
+// index has cached for it is stale and git has something it would like to
+// refresh. Each call uses a different instant: once git has written the
+// refreshed stat data, a second backdate to the *same* time matches what is
+// already recorded and asks git to do nothing at all — which is how a loop
+// measuring this can report "1 rewrite in 20 runs" for a command that in fact
+// rewrites the index every single time it is given something to refresh.
+func backdate(t *testing.T, path string) {
+	t.Helper()
+	backdateSeq++
+	when := time.Date(2001, time.March, 4, 5, 6, backdateSeq, 0, time.UTC)
+	if err := os.Chtimes(path, when, when); err != nil {
+		t.Fatal(err)
+	}
+}
+
+var backdateSeq int
+
+func hashFile(t *testing.T, path string) string {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(body))
+}
+
+// TestReadOnlyCommandsLeaveTheIndexAlone measures the read-only guarantee
+// instead of asserting it: a tracked file is backdated so git has an index
+// refresh to perform, and .git/index is hashed either side of the command. A
+// report grove only reads must leave the repository byte for byte as it found
+// it.
+//
+// Each case first proves its own fixture is live by running a plain `git
+// status` — no --no-optional-locks — and requiring that it *does* rewrite the
+// index. Without that control the test passes on a grove that never passed the
+// flag at all, because a repository whose stat data is already fresh gives git
+// nothing to refresh and every command looks read-only.
+//
+// diff is deliberately absent, and it is the command that most needs saying
+// out loud: on git 2.43.0 builtin/diff.c refreshes the index without
+// consulting use_optional_locks(), so `grove diff` still rewrites it — 20 runs
+// out of 20, with the flag and without it — and no flag grove can pass changes
+// that. See noOptionalLocks in internal/git/run.go for the measurements and
+// for what fixing it would cost; TestRunAlwaysPassesNoOptionalLocks pins the
+// part grove does control, which is the argv it hands git.
+func TestReadOnlyCommandsLeaveTheIndexAlone(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"status", []string{"status"}},
+		{"branch", []string{"branch"}},
+		{"log", []string{"log", "-n", "10"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			repo := testutil.NewRepo(t, filepath.Join(root, "api", "gateway"), testutil.WithCommit())
+			isolate(t)
+			readme := filepath.Join(repo, "README.md")
+			index := filepath.Join(repo, ".git", "index")
+
+			backdate(t, readme)
+			control := hashFile(t, index)
+			testutil.Run(t, repo, "status", "--porcelain")
+			if hashFile(t, index) == control {
+				t.Fatalf("the fixture proves nothing: plain git status left %s untouched, "+
+					"so this repository has no index refresh for the flag to prevent", index)
+			}
+
+			backdate(t, readme)
+			before := hashFile(t, index)
+			if out, code := run(t, append(tc.args, "--root", root)...); code != ExitOK {
+				t.Fatalf("exit = %d\n%s", code, out)
+			}
+			if hashFile(t, index) != before {
+				t.Errorf("grove %s rewrote %s — a command that only reads must leave the "+
+					"repositories it reads exactly as it found them", tc.name, index)
+			}
+		})
 	}
 }

@@ -57,14 +57,48 @@ func Available() error {
 	return nil
 }
 
+// noOptionalLocks is prefixed to every git invocation grove makes. It sets
+// GIT_OPTIONAL_LOCKS=0 for that one process, which asks git to skip the
+// sub-operations that would need to take a lock — above all, refreshing and
+// rewriting the index of a repository grove is only looking at.
+//
+// It lives here, in the single function every git call goes through, rather
+// than at the call sites. For most of this project's life it was spelled out
+// on the status call alone and forgotten by diff and log, which is what a
+// per-call-site rule reliably becomes: the next command forgets it too.
+// `fetch` carries it as well, harmlessly — the ref updates fetch exists to
+// perform are not optional operations, so the flag does not change its work.
+//
+// What it actually buys, measured on git 2.43.0 against a repository with one
+// tracked file whose mtime was backdated before every run, so the index's
+// cached stat data was stale each time and git had something to refresh:
+//
+//	git status --porcelain=v2 ...          20/20 runs rewrote .git/index
+//	git --no-optional-locks status ...      0/20
+//	git --no-optional-locks log ...         0/20   (log never reads the index)
+//	git --no-optional-locks diff --stat    20/20   (as does plain git diff)
+//
+// So it makes status genuinely read-only and costs nothing anywhere else — but
+// it does NOT make `grove diff` read-only on this git: builtin/diff.c refreshes
+// the index without consulting use_optional_locks(), so the flag is ignored
+// there. Leaving the index alone in diff would mean pointing GIT_INDEX_FILE at
+// a throwaway copy per repository — an extra git call and a file copy on every
+// repo, and the user's own index left stale for their next command. That is a
+// trade for the author to make deliberately, not one to smuggle in here.
+// TestReadOnlyCommandsLeaveTheIndexAlone pins the cases that do hold.
+const noOptionalLocks = "--no-optional-locks"
+
 // Run executes git in dir and returns its stdout. Arguments are passed as a
 // slice: no shell is involved, so paths with spaces or quotes are safe without
 // any escaping, and nothing a repository is named can turn into a command.
 //
+// Every call is prefixed with noOptionalLocks; see its comment for why that
+// belongs here rather than at each call site.
+//
 // A failure carries git's own first line of stderr rather than "exit status
 // 128", because that line is what ends up in the user's table.
 func Run(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := exec.CommandContext(ctx, "git", append([]string{noOptionalLocks}, args...)...)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -116,11 +150,10 @@ func Collect(ctx context.Context, found []discover.Found, opts CollectOpts) []Re
 func collectOne(ctx context.Context, f discover.Found, opts CollectOpts) Repo {
 	r := Repo{Path: f.RelPath, AbsPath: f.AbsPath, Group: f.Group}
 
-	// --no-optional-locks keeps a read-only report read-only: without it git
-	// may refresh and rewrite the index of a repository grove is only looking
-	// at, which is a poor way to repay a tool that fans out over a whole
-	// workspace.
-	out, err := Run(ctx, f.AbsPath, "--no-optional-locks",
+	// Run supplies --no-optional-locks, so this status call cannot refresh and
+	// rewrite the index of a repository grove is only looking at — a poor way
+	// to repay a tool that fans out over a whole workspace.
+	out, err := Run(ctx, f.AbsPath,
 		"status", "--porcelain=v2", "--branch", "--untracked-files=normal", "-z")
 	if err != nil {
 		// A bare repository has no work tree, so status cannot run in it at
