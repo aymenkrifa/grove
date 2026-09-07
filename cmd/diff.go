@@ -22,15 +22,22 @@ func newDiffCmd() *cobra.Command {
 			"repository's full diff. Everything after -- is passed to git diff verbatim.",
 		Args: cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			selector, passthrough := splitPassthrough(cmd, args)
+			selector, passthrough, err := splitPassthrough(cmd, args)
+			if err != nil {
+				return err
+			}
 			_, found, err := resolveAndFind(selector)
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
 
-			// One repository and no --stat: show the real diff.
-			if len(found) == 1 && !statOnly {
+			// A selector that narrows to exactly one repository, and no
+			// --stat: show the real diff. len(found)==1 alone is not enough
+			// — a workspace that simply *contains* only one repository must
+			// still get the --stat form when no selector was given, per
+			// §5.2 ("without a selector: a per-repo --stat summary").
+			if selector != "" && len(found) == 1 && !statOnly {
 				gitArgs := append([]string{"diff"}, passthrough...)
 				body, err := git.Run(cmd.Context(), found[0].AbsPath, gitArgs...)
 				if err != nil {
@@ -46,8 +53,11 @@ func newDiffCmd() *cobra.Command {
 				gitArgs := append([]string{"diff", "--stat"}, passthrough...)
 				body, err := git.Run(cmd.Context(), f.AbsPath, gitArgs...)
 				if err != nil {
+					// Diagnostics go to stderr, never into the (possibly
+					// paged) stdout body, so `grove diff 2>/dev/null` and a
+					// piped --stat summary both stay clean.
 					markPartialFailure()
-					fmt.Fprintf(&b, "%s: %v\n\n", f.RelPath, err)
+					fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", f.RelPath, err)
 					continue
 				}
 				if strings.TrimSpace(body) == "" {
@@ -62,13 +72,20 @@ func newDiffCmd() *cobra.Command {
 	return c
 }
 
-// splitPassthrough separates the selector from arguments after --.
-func splitPassthrough(cmd *cobra.Command, args []string) (string, []string) {
+// splitPassthrough separates the selector from arguments after --. At most
+// one argument may come before the --, matching every other command in this
+// batch: a second bare argument there is rejected rather than silently
+// dropped.
+func splitPassthrough(cmd *cobra.Command, args []string) (string, []string, error) {
 	n := cmd.ArgsLenAtDash()
-	if n < 0 {
-		return firstArg(args), nil
+	pre, post := args, []string(nil)
+	if n >= 0 {
+		pre, post = args[:n], args[n:]
 	}
-	return firstArg(args[:n]), args[n:]
+	if len(pre) > 1 {
+		return "", nil, fmt.Errorf("at most one selector is allowed, got %d: %v", len(pre), pre)
+	}
+	return firstArg(pre), post, nil
 }
 
 // page sends body through the user's pager when stdout is a terminal.
