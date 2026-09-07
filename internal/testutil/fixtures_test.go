@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -75,5 +76,32 @@ func TestBareRejectsWorkingTreeOptions(t *testing.T) {
 	}
 	if msg := conflictingOptions(repoCfg{commit: true, dirty: true}); msg != "" {
 		t.Errorf("working-tree options combine freely with each other, got %q", msg)
+	}
+}
+
+// The predicate above is only useful if NewRepo actually consults it, and that
+// wiring cannot be asserted in-process: the failure it produces is a t.Fatalf,
+// which would end this test rather than be observed by it. So the check runs in
+// a child copy of this test binary, where failing is the expected outcome.
+// Deleting the call site inside NewRepo makes the child succeed, and this test
+// fail — which is the whole point of it.
+func TestNewRepoRejectsBareWithWorkingTreeOptions(t *testing.T) {
+	const marker = "GROVE_TESTUTIL_EXPECT_FATAL"
+
+	if os.Getenv(marker) == "1" {
+		// Child process: this call is required to fail the test.
+		NewRepo(t, filepath.Join(t.TempDir(), "repo"), Bare(), WithCommit())
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestNewRepoRejectsBareWithWorkingTreeOptions")
+	cmd.Env = append(os.Environ(), marker+"=1")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("NewRepo(Bare(), WithCommit()) should have failed the test, but the "+
+			"child passed — is the conflictingOptions call still wired into NewRepo?\n%s", out)
+	}
+	if !strings.Contains(string(out), "Bare() cannot be combined") {
+		t.Errorf("the failure should explain the conflict, got:\n%s", out)
 	}
 }

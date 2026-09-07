@@ -166,8 +166,8 @@ func TestWalkDoesNotReportGitDirOfNormalRepo(t *testing.T) {
 	repo := testutil.NewRepo(t, filepath.Join(root, "api", "gateway"), testutil.WithCommit())
 
 	gitDir := filepath.Join(repo, ".git")
-	if !isRepo(gitDir) {
-		t.Fatalf("precondition: %s should look like a git directory to isRepo", gitDir)
+	if ok, err := isRepo(gitDir); err != nil || !ok {
+		t.Fatalf("precondition: %s should look like a git directory to isRepo (ok=%v, err=%v)", gitDir, ok, err)
 	}
 
 	got := mustWalk(t, root, 5, nil)
@@ -210,8 +210,9 @@ func TestWalkDoesNotMistakeLooseFilesForABareRepo(t *testing.T) {
 	}
 	testutil.NewRepo(t, filepath.Join(root, "api", "gateway"), testutil.WithCommit())
 
-	if isRepo(decoy) {
-		t.Errorf("isRepo(%s) = true; HEAD and objects as plain files are not a repository", decoy)
+	if ok, err := isRepo(decoy); ok || err != nil {
+		t.Errorf("isRepo(%s) = (%v, %v), want (false, nil); HEAD and objects as plain "+
+			"files are not a repository", decoy, ok, err)
 	}
 	got := mustWalk(t, root, 3, nil)
 	wantRels(t, got, "the decoy directory is not a bare repo", "api/gateway")
@@ -265,6 +266,45 @@ func TestWalkUnreadableSubdirectoryWarnsAndContinues(t *testing.T) {
 	}
 	if !strings.Contains(warns[0], fs.ErrPermission.Error()) {
 		t.Errorf("warning %q should say why it was skipped", warns[0])
+	}
+}
+
+// The depth guard returns before anything is read, so a directory sitting at
+// exactly the limit is never opened — and isRepo cannot examine it either. Both
+// halves of spec §10 have to survive that: an unreadable directory at the limit
+// still warns, and an unreadable *repository* there does not vanish in silence.
+// The first version of this fix got exactly this case wrong, and with
+// DefaultDepth = 3 it is the common layout rather than a corner.
+func TestWalkUnreadableDirectoryAtTheDepthLimitStillWarns(t *testing.T) {
+	requireNonRoot(t)
+	root := t.TempDir()
+	testutil.NewRepo(t, filepath.Join(root, "api", "gateway"), testutil.WithCommit())
+	// One is a repository and one is a plain directory. Both sit at level 2 and
+	// both are locked; from outside they are indistinguishable, which is the
+	// point — the walk cannot tell, so it must say so rather than guess "no".
+	lockDir(t, testutil.NewRepo(t, filepath.Join(root, "web", "locked"), testutil.WithCommit()))
+	opaque := filepath.Join(root, "web", "opaque")
+	if err := os.MkdirAll(opaque, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lockDir(t, opaque)
+
+	got, warns, err := Walk(root, 2, nil) // both locked directories are at exactly level 2
+	if err != nil {
+		t.Fatalf("Walk() error = %v; an unreadable subdirectory is never fatal", err)
+	}
+	wantRels(t, got, "neither locked directory can be identified, so neither is listed", "api/gateway")
+	if len(warns) != 2 {
+		t.Fatalf("warnings = %v, want one for web/locked and one for web/opaque — a "+
+			"directory skipped at the depth limit must not be skipped silently", warns)
+	}
+	for i, want := range []string{"web/locked", "web/opaque"} {
+		if !strings.Contains(warns[i], want) {
+			t.Errorf("warning %q should name %q", warns[i], want)
+		}
+		if !strings.Contains(warns[i], fs.ErrPermission.Error()) {
+			t.Errorf("warning %q should say why it was skipped", warns[i])
+		}
 	}
 }
 

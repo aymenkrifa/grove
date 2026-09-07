@@ -30,9 +30,10 @@ type Found struct {
 // with an empty slice would misreport "you cannot read this" as "there is
 // nothing here". An unreadable directory *below* the root is skipped, described
 // in the returned warnings, and the walk carries on, so one locked subtree
-// never costs the caller the rest of the tree. Warnings are returned rather
-// than printed because only Walk knows a directory was skipped, and only the
-// caller knows where its diagnostics go.
+// never costs the caller the rest of the tree. This holds at every level,
+// including the depth limit itself, where nothing is read at all. Warnings are
+// returned rather than printed because only Walk knows a directory was skipped,
+// and only the caller knows where its diagnostics go.
 func Walk(root string, depth int, ignore []string) ([]Found, []string, error) {
 	abs, err := filepath.Abs(root)
 	if err != nil {
@@ -46,7 +47,16 @@ func Walk(root string, depth int, ignore []string) ([]Found, []string, error) {
 	// Its caller decides what that means: fatal at the root, a warning below.
 	var recurse func(dir string, level int) error
 	recurse = func(dir string, level int) error {
-		if isRepo(dir) {
+		repo, err := isRepo(dir)
+		if err != nil {
+			// Cannot examine this directory. Reported, never swallowed: the
+			// depth guard below returns without reading anything, so an
+			// unreadable directory at exactly the limit would otherwise
+			// disappear in silence — and if it were a repository, disappear
+			// from the results entirely.
+			return err
+		}
+		if repo {
 			out = append(out, newFound(abs, dir))
 			return nil // stop descending: submodules are not separate repos
 		}
@@ -88,27 +98,52 @@ func Walk(root string, depth int, ignore []string) ([]Found, []string, error) {
 // A repository with a working tree carries a .git entry: a directory normally,
 // or a file for a linked worktree or a submodule. A bare repository carries no
 // .git at all — the directory *is* the git directory — so it is recognised by
-// its contents instead.
+// its contents: HEAD beside an objects directory, the shape `git init --bare`
+// produces.
 //
 // The second test also matches the .git directory of an ordinary repository,
 // which is correct in isolation but must not produce a duplicate entry during
 // the walk. It cannot: dot-prefixed directories are never descended into, and
 // descent stops at the working tree above it either way.
-func isRepo(dir string) bool {
-	if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
-		return true
+//
+// A returned error means neither question could be answered — the directory is
+// unreadable, almost always a permissions problem. That is deliberately NOT
+// folded into a false result. "I cannot tell" and "no" lead to different
+// places: one is a warning the user can act on, the other is a repository
+// quietly missing from the listing.
+func isRepo(dir string) (bool, error) {
+	git, err := entryExists(filepath.Join(dir, ".git"))
+	if err != nil {
+		return false, err
 	}
-	return isGitDir(dir)
+	if git {
+		return true, nil
+	}
+	// No .git. It may still be a bare repository.
+	head, err := entryExists(filepath.Join(dir, "HEAD"))
+	if err != nil || !head {
+		return false, err
+	}
+	// HEAD was statable, so the directory is searchable and a failure on
+	// objects means it is simply not there.
+	info, serr := os.Stat(filepath.Join(dir, "objects"))
+	return serr == nil && info.IsDir(), nil
 }
 
-// isGitDir reports whether dir looks like a git directory itself: HEAD beside
-// an objects directory. This is the shape `git init --bare` produces.
-func isGitDir(dir string) bool {
-	if _, err := os.Lstat(filepath.Join(dir, "HEAD")); err != nil {
-		return false
+// entryExists reports whether path exists, without following a final symlink.
+// A missing entry is (false, nil); anything else — permission denied above all
+// — is an error, because "I cannot look" must not be flattened into "it is not
+// there". Both of isRepo's probes route through here so that the distinction is
+// made in exactly one place.
+func entryExists(path string) (bool, error) {
+	_, err := os.Lstat(path)
+	if err == nil {
+		return true, nil
 	}
-	info, err := os.Stat(filepath.Join(dir, "objects"))
-	return err == nil && info.IsDir()
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
 }
 
 func newFound(root, dir string) Found {
