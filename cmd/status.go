@@ -23,13 +23,7 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			repos := git.Collect(cmd.Context(), found, git.CollectOpts{
-				Jobs: flagJobs,
-				// Counting stashes costs an extra git call per repository, so
-				// it is decided before collection rather than at render time:
-				// switching it off has to save the work, not just hide it.
-				Stash: res.Display.ShowStash && !noStash,
-			})
+			repos := git.Collect(cmd.Context(), found, collectOpts(res, noStash))
 			for _, r := range repos {
 				if r.Error != "" {
 					// One broken repository still gets its row; it only

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/aymenkrifa/grove/internal/config"
+	"github.com/aymenkrifa/grove/internal/git"
 	"github.com/aymenkrifa/grove/internal/testutil"
 )
 
@@ -379,6 +380,12 @@ func TestStatusNonexistentRootExitsOne(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "not-here") {
 		t.Errorf("the error does not name the root:\n%s", stderr)
+	}
+	// A root that is not there is not a root that holds no repositories: the
+	// walk's own error has to reach the user, not be replaced by the
+	// empty-workspace message that follows it.
+	if strings.Contains(stderr, "no git repositories") {
+		t.Errorf("a missing root was misreported as an empty one:\n%s", stderr)
 	}
 	if stdout != "" {
 		t.Errorf("stdout should be empty:\n%s", stdout)
@@ -790,5 +797,84 @@ func TestGlobalFlagsAreBound(t *testing.T) {
 	}
 	if _, _, code := runSplit(t, "status", "--root", root, "--jobs", "notanumber"); code != ExitError {
 		t.Errorf("a bad --jobs value should exit %d, got %d", ExitError, code)
+	}
+}
+
+// The exit codes are a contract with shell scripts, which see the numbers and
+// not the constants. Every other test compares against the constant, so only
+// this one can tell that ExitPartial is still 2.
+func TestExitCodeValues(t *testing.T) {
+	if ExitOK != 0 || ExitError != 1 || ExitPartial != 2 {
+		t.Errorf("exit codes = %d/%d/%d, want 0/1/2 per spec §5.7",
+			ExitOK, ExitError, ExitPartial)
+	}
+}
+
+func TestCollectOpts(t *testing.T) {
+	for name, tc := range map[string]struct {
+		jobs      int
+		showStash bool
+		noStash   bool
+		want      git.CollectOpts
+	}{
+		"defaults":                {0, true, false, git.CollectOpts{Jobs: 0, Stash: true}},
+		"--jobs reaches the pool": {4, true, false, git.CollectOpts{Jobs: 4, Stash: true}},
+		"--no-stash wins":         {0, true, true, git.CollectOpts{Jobs: 0, Stash: false}},
+		"config off":              {0, false, false, git.CollectOpts{Jobs: 0, Stash: false}},
+		"both off":                {2, false, true, git.CollectOpts{Jobs: 2, Stash: false}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			flagJobs = tc.jobs
+			t.Cleanup(func() { flagJobs = 0 })
+			res := &config.Resolved{Display: config.Display{ShowStash: tc.showStash}}
+			if got := collectOpts(res, tc.noStash); got != tc.want {
+				t.Errorf("collectOpts = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// An unreadable root is a different answer from an empty one. Reporting "no
+// git repositories under X" for a directory nobody could read would send the
+// user looking for the wrong problem, so the walk's error has to survive.
+func TestStatusUnreadableRootReportsTheRealCause(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read a 0000 directory")
+	}
+	isolate(t)
+	root := t.TempDir()
+	testutil.NewRepo(t, filepath.Join(root, "api", "gateway"), testutil.WithCommit())
+	if err := os.Chmod(root, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
+
+	_, stderr, code := runSplit(t, "status", "--root", root)
+	if code != ExitError {
+		t.Fatalf("exit = %d, want %d\n%s", code, ExitError, stderr)
+	}
+	if !strings.Contains(stderr, "permission denied") {
+		t.Errorf("the error does not give the cause:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "no git repositories") {
+		t.Errorf("an unreadable root was misreported as an empty one:\n%s", stderr)
+	}
+}
+
+func TestStatusBadConfigExitsOne(t *testing.T) {
+	isolate(t)
+	root := t.TempDir()
+	testutil.NewRepo(t, filepath.Join(root, "api", "gateway"), testutil.WithCommit())
+	writeConfig(t, "this is not = = toml\n")
+
+	stdout, stderr, code := runSplit(t, "status", "--root", root)
+	if code != ExitError {
+		t.Fatalf("exit = %d, want %d\nstdout: %s\nstderr: %s", code, ExitError, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "config.toml") {
+		t.Errorf("the error does not name the file to fix:\n%s", stderr)
+	}
+	if stdout != "" {
+		t.Errorf("stdout should be empty:\n%s", stdout)
 	}
 }

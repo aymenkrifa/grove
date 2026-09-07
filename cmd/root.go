@@ -139,6 +139,22 @@ func resolveAndFind(selector string) (*config.Resolved, []discover.Found, error)
 	return res, sel, nil
 }
 
+// collectOpts merges the config with the flags that govern collection rather
+// than presentation. It is a separate function from renderOptions because the
+// two answer different questions — what git work to do, and how to print it —
+// and because a value built inline inside RunE can only be checked through
+// whatever the table happens to show, which for --jobs is nothing at all.
+func collectOpts(res *config.Resolved, noStash bool) git.CollectOpts {
+	return git.CollectOpts{
+		Jobs: flagJobs,
+		// Counting stashes costs an extra git call per repository, so it is
+		// decided before collection rather than at render time: switching it
+		// off has to save the work, not just hide the number. Either source
+		// can switch it off; neither can override the other into on.
+		Stash: res.Display.ShowStash && !noStash,
+	}
+}
+
 // renderOptions merges config display settings with the global flags.
 //
 // It takes the writer because the colour decision depends on it: "auto" means
