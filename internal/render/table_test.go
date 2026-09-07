@@ -264,6 +264,51 @@ func TestSummaryLineCounts(t *testing.T) {
 	}
 }
 
+// --- the branch column ----------------------------------------------------
+
+func TestBranchColumn(t *testing.T) {
+	tests := []struct {
+		name string
+		repo git.Repo
+		want string
+	}{
+		{"a branch", git.Repo{Branch: "main"}, "main"},
+		// The two rows that would otherwise be identical: the same seven
+		// characters, once as a detached SHA and once as a branch name.
+		{"a detached head", git.Repo{Branch: "a1b2c3d", Detached: true}, "(a1b2c3d)"},
+		{"a branch that looks like a sha", git.Repo{Branch: "a1b2c3d"}, "a1b2c3d"},
+		{"a long sha is not shortened here", git.Repo{Branch: "a1b2c3d4e5f6", Detached: true}, "(a1b2c3d4e5f6)"},
+		// An errored repo has no head at all; empty parentheses would be worse
+		// than nothing.
+		{"detached with nothing to show", git.Repo{Detached: true}, ""},
+		{"no branch", git.Repo{}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := branch(tt.repo, painter{}).plain; got != tt.want {
+				t.Errorf("branch() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// The parenthesised form is two columns wider than the SHA it wraps, so the
+// column has to be measured after the parentheses are added, not before.
+func TestTableGoldenDetached(t *testing.T) {
+	repos := []git.Repo{
+		{Path: "api/gateway", Group: "api", Branch: "a1b2c3d", Detached: true, Clean: true},
+		{Path: "api/billing", Group: "api", Branch: "develop", Upstream: "origin/develop", Clean: true},
+	}
+	want := "api\n" +
+		"  gateway  (a1b2c3d)  clean  -\n" +
+		"  billing  develop    clean  ↑0 ↓0\n" +
+		"\n" +
+		"2 repos · 0 dirty · 0 ahead · 0 behind\n"
+	if got := render(t, repos, opts()); got != want {
+		t.Errorf("Table() =\n%q\nwant\n%q", got, want)
+	}
+}
+
 // --- the state column -----------------------------------------------------
 
 func TestStateColumn(t *testing.T) {

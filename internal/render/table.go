@@ -111,7 +111,7 @@ func layout(b *strings.Builder, rows [][]cell) {
 func repoCells(r git.Repo, d config.Display, p painter, sym symbols, pad string) []cell {
 	return []cell{
 		plainCell(pad + name(r, d)),
-		p.cellOf(dim, r.Branch),
+		branch(r, p),
 		state(r, p, sym),
 		divergence(r, p, sym),
 	}
@@ -125,6 +125,18 @@ func name(r git.Repo, d config.Display) string {
 		return strings.TrimPrefix(r.Path, r.Group+"/")
 	}
 	return r.Path
+}
+
+// branch is the branch column. A detached HEAD carries its short SHA in Branch,
+// which on its own is indistinguishable from a repo sitting on a branch whose
+// name happens to be seven hex characters. Parenthesising it is git's own
+// convention — `git branch` prints "* (HEAD detached at abc1234)" — so it reads
+// correctly to anyone who uses git, and costs two columns.
+func branch(r git.Repo, p painter) cell {
+	if r.Detached && r.Branch != "" {
+		return p.cellOf(dim, "("+r.Branch+")")
+	}
+	return p.cellOf(dim, r.Branch)
 }
 
 // state is the working-tree column.
