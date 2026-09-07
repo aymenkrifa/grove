@@ -414,3 +414,71 @@ func TestLogUnknownSelectorExitsError(t *testing.T) {
 		t.Errorf("exit = %d, want %d\n%s", code, ExitError, out)
 	}
 }
+
+// TestLogCorruptRepoIsPartialFailureAndReported is the third state, and the
+// one that used to fall through the gap between the other two: a repository
+// git cannot open at all — a .git file pointing at a directory that is not
+// there. `git log` fails, and so does the unborn probe, so log filed it under
+// "no commits yet" and skipped it in silence, exiting 0 on a workspace where
+// status, branch, diff, fetch and exec all exit 2.
+//
+// Both halves matter. The message is what tells the user which repository is
+// broken; the exit code is what a script reads, and a command that reports a
+// broken workspace as success is the failure that spreads.
+func TestLogCorruptRepoIsPartialFailureAndReported(t *testing.T) {
+	root := t.TempDir()
+	healthy := testutil.NewRepo(t, filepath.Join(root, "api", "gateway"))
+	commitAs(t, healthy, "only commit", "alice", t10, t10)
+
+	corrupt := filepath.Join(root, "tools", "broken")
+	if err := os.MkdirAll(corrupt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(corrupt, ".git"),
+		[]byte("gitdir: /nonexistent-grove-target\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	isolate(t)
+
+	stdout, stderr, code := runSplit(t, "log", "--root", root, "-n", "10")
+	if code != ExitPartial {
+		t.Fatalf("exit = %d, want %d — a repository git cannot open is a failure, "+
+			"and every other command already says so\nstdout: %s\nstderr: %s",
+			code, ExitPartial, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "tools/broken") {
+		t.Errorf("the corrupt repo should be named on stderr\n%s", stderr)
+	}
+	if !strings.Contains(stdout, "only commit") {
+		t.Errorf("the healthy repo's commit should still be reported\n%s", stdout)
+	}
+	if strings.Contains(stdout, "tools/broken") {
+		t.Errorf("the corrupt repo's error must not leak into stdout\n%s", stdout)
+	}
+}
+
+// TestLogUnbornRepoStaysSilentBesideAHealthyOne is the other side of the
+// probe added with the test above, and the mutant it kills is the tempting
+// simplification: reporting every git log failure. An unborn repository is an
+// ordinary, common state — a fresh `git init` in a workspace of clones — and
+// it must cost neither a line on stderr nor the exit code, while the
+// repositories that do have commits report normally.
+func TestLogUnbornRepoStaysSilentBesideAHealthyOne(t *testing.T) {
+	root := t.TempDir()
+	healthy := testutil.NewRepo(t, filepath.Join(root, "api", "gateway"))
+	commitAs(t, healthy, "only commit", "alice", t10, t10)
+	testutil.NewRepo(t, filepath.Join(root, "web", "fresh")) // unborn: no commits
+	isolate(t)
+
+	stdout, stderr, code := runSplit(t, "log", "--root", root, "-n", "10")
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d — an unborn repository is not a failure\nstderr: %s",
+			code, ExitOK, stderr)
+	}
+	if stderr != "" {
+		t.Errorf("an unborn repository must say nothing on stderr, got:\n%s", stderr)
+	}
+	if !strings.Contains(stdout, "only commit") {
+		t.Errorf("the healthy repo's commit should still be reported\n%s", stdout)
+	}
+}

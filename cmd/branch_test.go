@@ -133,3 +133,43 @@ func TestBranchErroredRepoGroupsUnderErrorAndExitsPartial(t *testing.T) {
 		t.Errorf("the healthy repo should still be reported\n%s", out)
 	}
 }
+
+// TestBranchReportsTheErrorItGroupsUnder covers what the "(error)" bucket
+// cannot say. The bucket names the repository; git's own message — the part
+// that tells the user whether the clone is corrupt, unreadable or something
+// else — was collected and then dropped, so `grove branch` handed back exit 2
+// and no explanation on either stream. It belongs on stderr, where every other
+// command puts per-repo failures and where it stays out of the listing.
+func TestBranchReportsTheErrorOnStderr(t *testing.T) {
+	root := t.TempDir()
+	testutil.NewRepo(t, filepath.Join(root, "api", "gateway"), testutil.WithCommit())
+	broken := filepath.Join(root, "tools", "broken")
+	if err := os.MkdirAll(broken, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(broken, ".git"),
+		[]byte("gitdir: /nonexistent-grove-target\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	isolate(t)
+
+	stdout, stderr, code := runSplit(t, "branch", "--root", root)
+	if code != ExitPartial {
+		t.Fatalf("exit = %d, want %d\nstdout: %s\nstderr: %s", code, ExitPartial, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "tools/broken") {
+		t.Errorf("stderr does not name the repository that failed:\n%s", stderr)
+	}
+	// git's own words, not just the path: "(error)" already carries as much
+	// as a bare path would.
+	if !strings.Contains(stderr, "nonexistent-grove-target") {
+		t.Errorf("stderr does not carry git's own message, so the user still cannot "+
+			"tell what went wrong:\n%s", stderr)
+	}
+	if strings.Contains(stdout, "nonexistent-grove-target") {
+		t.Errorf("the message must not land in the listing:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "api/gateway") {
+		t.Errorf("the healthy repo should still be listed\n%s", stdout)
+	}
+}

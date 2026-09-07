@@ -31,6 +31,15 @@ func newBranchCmd() *cobra.Command {
 			for _, r := range repos {
 				if r.Error != "" {
 					markPartialFailure()
+					// The table below files this repository under "(error)"
+					// and keeps nothing but its path, so without this line
+					// git's own message reaches neither stream and the user
+					// gets exit 2 with no explanation of what went wrong.
+					// Stderr rather than the table: status has a column wide
+					// enough to carry a message and branch does not, and every
+					// other command already reports per-repo failures here, so
+					// `grove branch 2>/dev/null` still yields a clean listing.
+					fmt.Fprintf(cmd.ErrOrStderr(), "%s: %s\n", r.Path, r.Error)
 				}
 			}
 			out := cmd.OutOrStdout()

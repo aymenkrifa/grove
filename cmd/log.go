@@ -65,14 +65,27 @@ func newLogCmd() *cobra.Command {
 					// situations: a repository with no commits yet (unborn)
 					// and one that is genuinely broken. Only the second is
 					// worth a message and a partial-failure exit, so probe
-					// HEAD directly. `rev-parse --verify` also fails when HEAD
-					// resolves to a commit whose object is missing from a
-					// corrupt repository — that case is silently skipped here
-					// too, which is an accepted tradeoff (unborn is by far the
-					// more common cause, and telling the two apart cheaply
-					// would need more than one extra git call per repo).
+					// before deciding.
+					//
+					// Two probes, because neither separates the cases alone.
+					// `rev-parse --git-dir` asks the narrower question — is
+					// there a repository here at all — and it is the one that
+					// fails for a repository git cannot open while succeeding
+					// for an unborn one. Without it, a broken repository was
+					// filed under "unborn" and skipped in silence, so `grove
+					// log` exited 0 on a workspace where status, branch, diff,
+					// fetch and exec all exit 2. The exit code is a contract
+					// scripts read; one command quietly opting out of it is
+					// worse than the missing message.
+					if _, gerr := git.Run(cmd.Context(), f.AbsPath, "rev-parse", "--git-dir"); gerr != nil {
+						markPartialFailure()
+						fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", f.RelPath, err)
+						continue
+					}
+					// A repository that opens, but whose HEAD names no commit:
+					// common, expected, and not a failure at all.
 					if _, verr := git.Run(cmd.Context(), f.AbsPath, "rev-parse", "--quiet", "--verify", "HEAD"); verr != nil {
-						continue // unborn (or corrupt): nothing to log, not worth reporting
+						continue // unborn: nothing to log, nothing to report
 					}
 					markPartialFailure()
 					fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", f.RelPath, err)
