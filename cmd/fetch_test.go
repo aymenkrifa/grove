@@ -5,8 +5,25 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aymenkrifa/grove/internal/git"
 	"github.com/aymenkrifa/grove/internal/testutil"
 )
+
+// TestFetchJobs closes a real gap found by mutating past the existing tests:
+// hardcoding fetch's concurrency to 1 (ignoring --jobs entirely) survived the
+// whole suite, because no black-box test can observe concurrency level from
+// output alone. fetchJobs is checked directly instead.
+func TestFetchJobs(t *testing.T) {
+	if got, want := fetchJobs(4), 4; got != want {
+		t.Errorf("fetchJobs(4) = %d, want %d", got, want)
+	}
+	if got, want := fetchJobs(0), git.DefaultJobs(); got != want {
+		t.Errorf("fetchJobs(0) = %d, want DefaultJobs() = %d", got, want)
+	}
+	if got, want := fetchJobs(-1), git.DefaultJobs(); got != want {
+		t.Errorf("fetchJobs(-1) = %d, want DefaultJobs() = %d", got, want)
+	}
+}
 
 // TestFetchOnBrokenRemoteIsPartialFailure replaces the brief's premise, which
 // does not hold under git 2.43: `git fetch --quiet` with NO remote configured
@@ -53,18 +70,24 @@ func TestFetchMixedResultsCountsAndReportsEachRepo(t *testing.T) {
 	addBrokenRemote(t, broken)
 	isolate(t)
 
-	out, code := run(t, "fetch", "--root", root)
+	stdout, stderr, code := runSplit(t, "fetch", "--root", root)
 	if code != ExitPartial {
-		t.Fatalf("exit = %d, want %d\n%s", code, ExitPartial, out)
+		t.Fatalf("exit = %d, want %d\nstdout: %s\nstderr: %s", code, ExitPartial, stdout, stderr)
 	}
-	if !strings.Contains(out, "fetched 1 of 2") {
-		t.Errorf("output = %q, want a summary counting exactly one success", out)
+	if !strings.Contains(stdout, "fetched 1 of 2") {
+		t.Errorf("stdout = %q, want a summary counting exactly one success", stdout)
 	}
-	if strings.Contains(out, "api/gateway:") {
-		t.Errorf("the successful repo should not carry an error line\n%s", out)
+	// Stream placement: the result summary belongs on stdout, per-repo
+	// diagnostics on stderr, so `grove fetch 2>/dev/null` shows only the
+	// summary and `grove fetch >/dev/null` shows only the errors.
+	if strings.Contains(stdout, "web/dashboard:") {
+		t.Errorf("the failing repo's error should not appear on stdout\n%s", stdout)
 	}
-	if !strings.Contains(out, "web/dashboard:") {
-		t.Errorf("the failing repo should be named beside its error\n%s", out)
+	if strings.Contains(stderr, "api/gateway:") {
+		t.Errorf("the successful repo should not carry an error line\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "web/dashboard:") {
+		t.Errorf("the failing repo should be named on stderr beside its error\n%s", stderr)
 	}
 }
 
