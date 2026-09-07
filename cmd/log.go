@@ -39,6 +39,15 @@ func newLogCmd() *cobra.Command {
 				return err
 			}
 			// \x1f separates fields; it cannot occur in a commit subject.
+			//
+			// --no-merges: a merge commit carries no diff of its own and its
+			// subject is usually a generated "Merge branch ..." line that says
+			// nothing about what changed, so it would just add noise to a
+			// timeline that is already mixing many repositories together. No
+			// other command in this batch takes a flag to toggle its git
+			// arguments on or off, so this is a fixed choice rather than a new
+			// bit of surface area to maintain; TestLogExcludesMergeCommits
+			// pins it.
 			gitArgs := []string{"log", "--no-merges", "--pretty=format:%ct\x1f%h\x1f%an\x1f%s",
 				"-n", strconv.Itoa(limit)}
 			if since != "" {
@@ -52,8 +61,22 @@ func newLogCmd() *cobra.Command {
 			for _, f := range found {
 				body, err := git.Run(cmd.Context(), f.AbsPath, gitArgs...)
 				if err != nil {
+					// git log fails identically for two very different
+					// situations: a repository with no commits yet (unborn)
+					// and one that is genuinely broken. Only the second is
+					// worth a message and a partial-failure exit, so probe
+					// HEAD directly. `rev-parse --verify` also fails when HEAD
+					// resolves to a commit whose object is missing from a
+					// corrupt repository — that case is silently skipped here
+					// too, which is an accepted tradeoff (unborn is by far the
+					// more common cause, and telling the two apart cheaply
+					// would need more than one extra git call per repo).
+					if _, verr := git.Run(cmd.Context(), f.AbsPath, "rev-parse", "--quiet", "--verify", "HEAD"); verr != nil {
+						continue // unborn (or corrupt): nothing to log, not worth reporting
+					}
 					markPartialFailure()
-					continue // an unborn repo has no log; that is not worth a message
+					fmt.Fprintf(cmd.ErrOrStderr(), "%s: %v\n", f.RelPath, err)
+					continue
 				}
 				for _, line := range strings.Split(strings.TrimSpace(body), "\n") {
 					if line == "" {
@@ -68,7 +91,13 @@ func newLogCmd() *cobra.Command {
 				}
 			}
 			sort.SliceStable(all, func(i, j int) bool { return all[i].when > all[j].when })
-			if len(all) > limit {
+			// limit <= 0 means "unlimited" — git's own convention (`git log -n
+			// -1` shows everything; `-n 0` shows nothing, and by then all is
+			// already empty because every per-repo call was given the same
+			// -n). Slicing all[:limit] with a negative limit panics, and that
+			// panic's exit status is indistinguishable from ExitPartial to a
+			// caller, so the guard has to come first.
+			if limit > 0 && len(all) > limit {
 				all = all[:limit]
 			}
 
