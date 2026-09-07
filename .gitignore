@@ -1,0 +1,10 @@
+# Superpowers working material — specs, plans, task briefs, review diffs.
+# Local process artefacts, never published.
+docs/superpowers/
+.superpowers/
+
+# Build output
+/grove
+/git-grove
+dist/
+*.test
