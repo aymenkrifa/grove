@@ -1,9 +1,7 @@
 package config
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +13,12 @@ import (
 type Opts struct {
 	Root      string // --root
 	Workspace string // -w/--workspace
-	Cwd       string
+
+	// Cwd is the directory the command was invoked from. It MUST be absolute.
+	// Rule 3 walks towards the filesystem root with filepath.Dir, which for a
+	// relative path bottoms out at "." instead of "/", so an ancestor marker
+	// file would never be found. Callers pass os.Getwd().
+	Cwd string
 }
 
 // Resolved is the effective workspace a command operates on.
@@ -54,15 +57,16 @@ func Resolve(cfg *Config, o Opts) (*Resolved, error) {
 		return nil, fmt.Errorf("unknown workspace %q; `grove config show` lists the configured ones", o.Workspace)
 	}
 	// 3. marker file at cwd or an ancestor
-	if dir, mark, ok := findMarker(o.Cwd); ok {
-		r := &Resolved{Root: dir, Depth: DefaultDepth, Display: cfg.Display, Source: MarkerName}
+	dir, mark, ok, err := findMarker(o.Cwd, cfg.Display)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		r := &Resolved{Root: dir, Depth: DefaultDepth, Display: mark.Display, Source: MarkerName}
 		if mark.Depth > 0 {
 			r.Depth = mark.Depth
 		}
 		r.Ignore = mark.Ignore
-		if mark.hasDisplay {
-			r.Display = mark.Display
-		}
 		return r, nil
 	}
 	// 4. a configured workspace containing cwd
@@ -92,30 +96,37 @@ func fromWorkspace(w Workspace, d Display, source string) *Resolved {
 }
 
 type marker struct {
-	Depth      int      `toml:"depth"`
-	Ignore     []string `toml:"ignore"`
-	Display    Display  `toml:"display"`
-	hasDisplay bool
+	Depth   int      `toml:"depth"`
+	Ignore  []string `toml:"ignore"`
+	Display Display  `toml:"display"`
 }
 
-func findMarker(start string) (string, marker, bool) {
+// findMarker walks from start towards the filesystem root, returning the first
+// directory holding a marker file.
+//
+// The marker's display table is unmarshalled over seed, so keys the marker
+// omits keep the value they had globally: spec §4.2 calls this "an optional
+// [display] override", which is a merge, not a wholesale replacement.
+//
+// A marker that does not parse is a returned error rather than something to
+// walk past. Skipping it would silently resolve the root to some ancestor
+// directory, and §4.1 exists so the user can always tell which rule chose the
+// root — a typo in a marker must not quietly change the answer.
+func findMarker(start string, seed Display) (string, marker, bool, error) {
 	dir := start
 	for {
 		path := filepath.Join(dir, MarkerName)
 		data, err := os.ReadFile(path)
 		if err == nil {
-			m := marker{Display: defaults().Display}
-			if e := toml.Unmarshal(data, &m); e == nil {
-				m.hasDisplay = strings.Contains(string(data), "[display]")
-				return dir, m, true
+			m := marker{Display: seed}
+			if e := toml.Unmarshal(data, &m); e != nil {
+				return "", marker{}, false, fmt.Errorf("parse %s: %w", path, e)
 			}
-		} else if !errors.Is(err, fs.ErrNotExist) {
-			// Unreadable marker: treat as absent rather than failing the run.
-			_ = err
+			return dir, m, true, nil
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", marker{}, false
+			return "", marker{}, false, nil
 		}
 		dir = parent
 	}
@@ -138,5 +149,8 @@ func isWithin(path, root string) bool {
 	if err != nil {
 		return false
 	}
-	return rel == "." || !strings.HasPrefix(rel, "..")
+	// Testing only for a ".." prefix would also reject a legitimate child whose
+	// name merely begins with two dots, such as "..cache": the escape marker is
+	// the whole first segment, not the first two characters.
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }

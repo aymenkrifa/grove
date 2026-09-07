@@ -4,6 +4,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -77,7 +78,7 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	if err := toml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	for i := range cfg.Workspaces {
 		cfg.Workspaces[i].Root = ExpandPath(cfg.Workspaces[i].Root, filepath.Dir(path))

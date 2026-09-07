@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -53,5 +54,28 @@ func TestLoadMissingFileIsNotAnError(t *testing.T) {
 	}
 	if len(cfg.Workspaces) != 0 {
 		t.Errorf("got %d workspaces, want 0", len(cfg.Workspaces))
+	}
+}
+
+func TestLoadMalformedConfigIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, "cfg"))
+
+	path := filepath.Join(dir, "cfg", "grove", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// An unterminated table header: valid-looking, definitely not valid TOML.
+	if err := os.WriteFile(path, []byte("default = \"work\"\n[[workspace\nname = \"work\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() with a malformed config should error, not fall back to defaults")
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("error %q should name the offending file %q", err, path)
 	}
 }
