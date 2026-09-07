@@ -23,6 +23,10 @@ func newBranchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Deliberately not collectOpts(res, ...): that would decide
+			// whether to pay for an extra stash-counting git call per
+			// repository, and branch never prints a stash count, so there is
+			// nothing here for that call to buy.
 			repos := git.Collect(cmd.Context(), found, git.CollectOpts{Jobs: flagJobs})
 			for _, r := range repos {
 				if r.Error != "" {
