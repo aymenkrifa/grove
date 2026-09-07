@@ -357,3 +357,27 @@ func TestRelWithin(t *testing.T) {
 		}
 	}
 }
+
+// TestResolveScopeAtAGroveThatIsItselfARepo pins the empty selector against
+// the one shape where the walk reports a repository at the root itself: the
+// contract is that "" means the whole grove, and scopeFor must not answer "."
+// — which grove would then resolve back to every repository anyway, by a
+// longer route and with a puzzling "→ grove status ." on screen.
+func TestResolveScopeAtAGroveThatIsItselfARepo(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "cfg"))
+	t.Setenv("GROVE_ROOT", "")
+	testutil.NewRepo(t, root, testutil.WithCommit())
+	if err := os.WriteFile(filepath.Join(root, config.MarkerName), []byte("depth = 3\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, root)
+
+	out, code := run(t, "__resolve", "--scope")
+	if code != ExitOK {
+		t.Fatalf("exit = %d\n%s", code, out)
+	}
+	if got := strings.TrimSpace(out); got != "" {
+		t.Errorf("scope = %q, want empty — the root itself is the whole grove", got)
+	}
+}
