@@ -10,10 +10,72 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aymenkrifa/grove/internal/discover"
 	"github.com/aymenkrifa/grove/internal/testutil"
 )
+
+// TestMain lets this binary stand in for git — see standInGit. Re-executed
+// under the name "git" with GROVE_FAKE_GIT_LOG set, it records one call and
+// exits instead of running any test.
+func TestMain(m *testing.M) {
+	if log := os.Getenv("GROVE_FAKE_GIT_LOG"); log != "" {
+		os.Exit(recordCall(log))
+	}
+	os.Exit(m.Run())
+}
+
+// recordCall is the whole of the stand-in git: two timestamps bracketing a
+// short sleep, then a successful exit printing nothing. Empty status output
+// parses to an empty Repo, which is all the concurrency fixture needs.
+func recordCall(log string) int {
+	stamp := func(kind string) error {
+		f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			return err
+		}
+		// One formatted Write per line: appends this small do not interleave.
+		if _, err := fmt.Fprintf(f, "%s %d\n", kind, time.Now().UnixNano()); err != nil {
+			f.Close()
+			return err
+		}
+		return f.Close()
+	}
+	if err := stamp("start"); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	// Long enough that six calls through a pool of three overlap even when
+	// each process is a race-instrumented binary that takes a moment to reach
+	// main; short enough that the whole fixture stays under a few seconds.
+	time.Sleep(150 * time.Millisecond)
+	if err := stamp("end"); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
+}
+
+// standInGit puts the recording stand-in at bin/git and points it at log.
+//
+// The stand-in is this test binary, symlinked under the name git, rather than
+// the obvious shell script: that script needs `date +%s%N` for nanoseconds and
+// a fractional `sleep`, and both are GNU extensions that BSD userland — macOS
+// included — does not provide. A Go binary times itself the same way
+// everywhere.
+func standInGit(t *testing.T, bin, log string) {
+	t.Helper()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locating the test binary: %v", err)
+	}
+	if err := os.Symlink(self, filepath.Join(bin, "git")); err != nil {
+		t.Fatalf("linking the stand-in git: %v", err)
+	}
+	t.Setenv("GROVE_FAKE_GIT_LOG", log)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
 
 // walk is discover.Walk with the warnings dropped: no test here builds an
 // unreadable directory, so a warning would mean the fixture is wrong.
@@ -133,6 +195,41 @@ func TestCollectAttachedHeadKeepsItsBranchName(t *testing.T) {
 	}
 	if got[0].Branch != "feature/x" {
 		t.Errorf("Branch = %q, want feature/x", got[0].Branch)
+	}
+}
+
+// TestCollectLinkedWorktreeIsAnOrdinaryRepo covers the other shape a .git
+// entry takes: a file, holding a pointer into the parent repository's git
+// directory. It resolves, so status runs normally — the worktree reports its
+// own branch and is neither bare nor an error.
+func TestCollectLinkedWorktreeIsAnOrdinaryRepo(t *testing.T) {
+	root := t.TempDir()
+	main := testutil.NewRepo(t, filepath.Join(root, "main"), testutil.WithCommit())
+	testutil.Run(t, main, "worktree", "add", "-q", "-b", "wt-branch", filepath.Join(root, "wt"))
+
+	got := Collect(context.Background(), walk(t, root), CollectOpts{Jobs: 2})
+
+	if len(got) != 2 {
+		t.Fatalf("got %d repos, want 2 (the repository and its linked worktree)", len(got))
+	}
+	wt := got[1] // "main" sorts before "wt"
+	if wt.Path != "wt" {
+		t.Fatalf("got[1].Path = %q, want wt", wt.Path)
+	}
+	if wt.Error != "" {
+		t.Fatalf("Error = %q, want none — a .git file is a repository too", wt.Error)
+	}
+	if wt.Bare {
+		t.Error("Bare = true, want false: a linked worktree has a working tree")
+	}
+	if wt.Detached {
+		t.Error("Detached = true, want false")
+	}
+	if wt.Branch != "wt-branch" {
+		t.Errorf("Branch = %q, want wt-branch — the worktree's own branch, not the parent's", wt.Branch)
+	}
+	if got[0].Branch != "main" {
+		t.Errorf("got[0].Branch = %q, want main", got[0].Branch)
 	}
 }
 
@@ -342,18 +439,11 @@ func TestCollectHandlesPathsWithSpacesAndQuotes(t *testing.T) {
 // invisible to every other test in this file.
 func TestCollectBoundsConcurrency(t *testing.T) {
 	const (
-		repos = 12
+		repos = 6
 		jobs  = 3
 	)
-	bin := t.TempDir()
 	log := filepath.Join(t.TempDir(), "calls.log")
-	script := "#!/bin/sh\n" +
-		"printf 'start %s\\n' \"$(date +%s%N)\" >> \"" + log + "\"\n" +
-		"sleep 0.05\n" +
-		"printf 'end %s\\n' \"$(date +%s%N)\" >> \"" + log + "\"\n"
-	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	standInGit(t, t.TempDir(), log)
 
 	root := t.TempDir()
 	var found []discover.Found
@@ -366,7 +456,6 @@ func TestCollectBoundsConcurrency(t *testing.T) {
 		found = append(found, discover.Found{AbsPath: dir, RelPath: name})
 	}
 
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	Collect(context.Background(), found, CollectOpts{Jobs: jobs})
 
 	if peak := peakOverlap(t, log); peak > jobs {
@@ -425,17 +514,58 @@ func peakOverlap(t *testing.T, log string) int {
 	return peak
 }
 
+// TestJobsFor checks the sizing rule at CPU counts this host does not have,
+// which is the only way to check it at all: asking the machine for its CPU
+// count and asserting the same arithmetic back passes for any multiplier.
+func TestJobsFor(t *testing.T) {
+	tests := []struct {
+		ncpu, want int
+	}{
+		{0, 1},   // floor: a pool of zero workers never finishes
+		{1, 2},   // two per CPU, because git waits on the disk
+		{4, 8},   //
+		{8, 16},  // the cap is reached exactly here
+		{16, 16}, // and holds
+		{64, 16}, // and holds on the largest machines
+	}
+	for _, tt := range tests {
+		t.Run(strconv.Itoa(tt.ncpu)+"cpu", func(t *testing.T) {
+			if got := jobsFor(tt.ncpu); got != tt.want {
+				t.Errorf("jobsFor(%d) = %d, want %d", tt.ncpu, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDefaultJobs covers only the wiring — that the exported function asks the
+// machine and applies the rule. The rule itself is TestJobsFor's job.
 func TestDefaultJobs(t *testing.T) {
-	n := DefaultJobs()
-	if n < 1 {
-		t.Errorf("DefaultJobs() = %d, want at least 1", n)
+	if got, want := DefaultJobs(), jobsFor(runtime.NumCPU()); got != want {
+		t.Errorf("DefaultJobs() = %d, want jobsFor(%d) = %d", got, runtime.NumCPU(), want)
 	}
-	if n > 16 {
-		t.Errorf("DefaultJobs() = %d, want at most 16 — the cap is what keeps a big "+
-			"workspace from spawning a git process per repo", n)
+	if n := DefaultJobs(); n < 1 || n > 16 {
+		t.Errorf("DefaultJobs() = %d, want between 1 and 16", n)
 	}
-	if want := min(runtime.NumCPU()*2, 16); n != want {
-		t.Errorf("DefaultJobs() = %d, want %d on a %d-CPU machine", n, want, runtime.NumCPU())
+}
+
+func TestAvailableFindsGit(t *testing.T) {
+	if err := Available(); err != nil {
+		t.Errorf("Available() = %v, want nil — git is on PATH wherever this suite runs", err)
+	}
+}
+
+// TestAvailableReportsAMissingGit is what spares the user twenty copies of
+// `exec: "git": executable file not found` in a twenty-repository workspace.
+func TestAvailableReportsAMissingGit(t *testing.T) {
+	t.Setenv("PATH", "")
+
+	err := Available()
+	if err == nil {
+		t.Fatal("Available() = nil with an empty PATH, want an error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "git") || !strings.Contains(msg, "PATH") {
+		t.Errorf("error = %q, want it to name git and say it must be on PATH", msg)
 	}
 }
 

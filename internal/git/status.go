@@ -12,9 +12,14 @@ import (
 // Exactly one record type is variable-length — a rename ("2 ") is followed by
 // a second NUL-terminated field holding the original path — and that field
 // must be consumed here, because it is an ordinary path and would otherwise be
-// read as the next record. An original path such as "? old name.txt" would
-// then be counted as an untracked file, and every count after it would be
-// wrong in a way nothing in the output announces.
+// read as a record in its own right.
+//
+// Because every field is NUL-terminated, the records after it still line up;
+// what goes wrong is the counting. An original path spelled like a record —
+// "? old name.txt", or anything beginning "1 ", "2 ", "u " or "? " — is
+// counted as one, and an original path spelled like anything else is silently
+// ignored. Either way nothing in the output announces it, which is why the
+// tests rename a file whose old name reads as an untracked entry.
 func ParseStatus(out []byte, r *Repo) error {
 	records := strings.Split(string(out), "\x00")
 	for i := 0; i < len(records); i++ {

@@ -21,8 +21,21 @@ type CollectOpts struct {
 
 // DefaultJobs bounds concurrency so a workspace of hundreds of repos does not
 // spawn hundreds of git processes at once.
-func DefaultJobs() int {
-	n := runtime.NumCPU() * 2
+func DefaultJobs() int { return jobsFor(runtime.NumCPU()) }
+
+// jobsFor holds DefaultJobs's arithmetic away from the machine it runs on, so
+// the rule can be checked at CPU counts this host does not have. Asking the
+// host how many CPUs it has and then asserting the same calculation back is
+// not a test of anything.
+//
+// Twice the CPU count, because a git process spends most of its life waiting
+// on the disk rather than computing. Capped, because the pool exists to stay
+// well clear of the process and descriptor limits. Floored at one, because a
+// pool of zero workers never finishes: runtime.NumCPU returns 1 on a system
+// whose CPU count cannot be read today, but that is an implementation detail
+// rather than a documented promise, and this line costs nothing.
+func jobsFor(ncpu int) int {
+	n := ncpu * 2
 	if n > 16 {
 		n = 16
 	}
@@ -30,6 +43,18 @@ func DefaultJobs() int {
 		n = 1
 	}
 	return n
+}
+
+// Available reports whether the git binary can be found, so a caller can fail
+// once with a clear message instead of once per repository. Without it a
+// missing git is discovered separately by every worker, and a workspace of
+// twenty repositories answers a single mistake twenty times.
+func Available() error {
+	if _, err := exec.LookPath("git"); err != nil {
+		return fmt.Errorf("git was not found on PATH: grove runs the git binary, "+
+			"so install git and make sure it is on your PATH (%v)", err)
+	}
+	return nil
 }
 
 // Run executes git in dir and returns its stdout. Arguments are passed as a
@@ -91,7 +116,12 @@ func Collect(ctx context.Context, found []discover.Found, opts CollectOpts) []Re
 func collectOne(ctx context.Context, f discover.Found, opts CollectOpts) Repo {
 	r := Repo{Path: f.RelPath, AbsPath: f.AbsPath, Group: f.Group}
 
-	out, err := Run(ctx, f.AbsPath, "status", "--porcelain=v2", "--branch", "--untracked-files=normal", "-z")
+	// --no-optional-locks keeps a read-only report read-only: without it git
+	// may refresh and rewrite the index of a repository grove is only looking
+	// at, which is a poor way to repay a tool that fans out over a whole
+	// workspace.
+	out, err := Run(ctx, f.AbsPath, "--no-optional-locks",
+		"status", "--porcelain=v2", "--branch", "--untracked-files=normal", "-z")
 	if err != nil {
 		// A bare repository has no work tree, so status cannot run in it at
 		// all. That is a state to report, not a failure, and the only way to

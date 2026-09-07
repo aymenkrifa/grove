@@ -12,7 +12,8 @@ import (
 // statusOf runs the same git command the collector runs.
 func statusOf(t *testing.T, dir string) []byte {
 	t.Helper()
-	cmd := exec.Command("git", "status", "--porcelain=v2", "--branch", "--untracked-files=normal", "-z")
+	cmd := exec.Command("git", "--no-optional-locks",
+		"status", "--porcelain=v2", "--branch", "--untracked-files=normal", "-z")
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
