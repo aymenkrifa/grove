@@ -50,6 +50,8 @@ func newRootCmd() *cobra.Command {
 		newStatusCmd(),
 		newListCmd(),
 		newBranchCmd(),
+		newDiffCmd(),
+		newFetchCmd(),
 	)
 	return root
 }
