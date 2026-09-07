@@ -349,6 +349,15 @@ func TestBranchColumn(t *testing.T) {
 			if got := branch(tt.repo, painter{}).plain; got != tt.want {
 				t.Errorf("branch() = %q, want %q", got, tt.want)
 			}
+			// Both forms of the cell are dim; a detached head is marked by
+			// the parentheses, not by dropping out of the column's colour.
+			wantPainted := tt.want
+			if wantPainted != "" {
+				wantPainted = dim + wantPainted + reset
+			}
+			if got := branch(tt.repo, painter{on: true}).painted; got != wantPainted {
+				t.Errorf("painted branch() = %q, want %q", got, wantPainted)
+			}
 		})
 	}
 }
