@@ -40,17 +40,42 @@ type RepoOpt func(*repoCfg)
 
 func WithCommit() RepoOpt         { return func(c *repoCfg) { c.commit = true } }
 func WithBranch(b string) RepoOpt { return func(c *repoCfg) { c.branch = b } }
-func Dirty() RepoOpt              { return func(c *repoCfg) { c.dirty = true } }
-func Staged() RepoOpt             { return func(c *repoCfg) { c.staged = true } }
-func Untracked() RepoOpt          { return func(c *repoCfg) { c.untracked = true } }
-func Bare() RepoOpt               { return func(c *repoCfg) { c.bare = true } }
+
+// Dirty leaves README.md modified but unstaged. It implies WithCommit,
+// because an unstaged modification requires an already-tracked file.
+func Dirty() RepoOpt { return func(c *repoCfg) { c.dirty = true } }
+
+func Staged() RepoOpt    { return func(c *repoCfg) { c.staged = true } }
+func Untracked() RepoOpt { return func(c *repoCfg) { c.untracked = true } }
+
+// Bare builds a repository with no working tree. It cannot be combined with
+// any other option; NewRepo fails the test if it is.
+func Bare() RepoOpt { return func(c *repoCfg) { c.bare = true } }
 
 // NewRepo creates a git repository at dir and returns dir.
+//
+// Two constraints the option set cannot express on its own, and which quietly
+// build the wrong fixture if left implicit:
+//
+//   - Dirty() means a tracked file carrying unstaged modifications, and nothing
+//     is tracked until something is committed. Dirty() therefore implies
+//     WithCommit(). Without that it would leave an *untracked* README behind
+//     instead, which is a different git status altogether — and every test
+//     built on it would be asserting the wrong thing.
+//   - Bare() produces a repository with no working tree, so no other option can
+//     apply to it. Combining them is a mistake in the calling test rather than
+//     something to resolve silently, so it fails the test loudly.
 func NewRepo(t *testing.T, dir string, opts ...RepoOpt) string {
 	t.Helper()
 	c := repoCfg{}
 	for _, o := range opts {
 		o(&c)
+	}
+	if msg := conflictingOptions(c); msg != "" {
+		t.Fatalf("testutil.NewRepo(%s): %s", dir, msg)
+	}
+	if c.dirty {
+		c.commit = true // there must be a tracked file before it can be modified
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -86,4 +111,16 @@ func write(t *testing.T, path, body string) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// conflictingOptions reports why an option set cannot be built, or "" when it
+// is coherent. It is separate from NewRepo so that it can be tested directly:
+// the alternative is asserting on a t.Fatalf, which ends the test that calls it.
+func conflictingOptions(c repoCfg) string {
+	if c.bare && (c.commit || c.branch != "" || c.dirty || c.staged || c.untracked) {
+		return "Bare() cannot be combined with working-tree options (WithCommit, " +
+			"WithBranch, Dirty, Staged, Untracked) — a bare repository has no " +
+			"working tree for them to act on"
+	}
+	return ""
 }

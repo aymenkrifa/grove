@@ -9,10 +9,18 @@ import (
 // Select narrows repos by selector, using the four stages in the spec, §6.1.
 // An empty selector returns everything. Ambiguity is an error, never a guess.
 func Select(repos []Found, selector string) ([]Found, error) {
-	if selector == "" {
+	// A leading "./" and a trailing "/" are shell-completion noise rather than
+	// part of the name, so they come off first. That can empty the selector —
+	// "", "./" and "/" all name the root, which is every repository — and the
+	// emptiness check must therefore happen AFTER the trimming, not before it.
+	// Checking first lets "./" fall through to stage 2, where an empty string
+	// equals the Group of every root-level repository and silently returns that
+	// subset as though the user had asked for it. §6.1 forbids guessing, and a
+	// plausible-looking wrong answer is the worst kind of guess.
+	sel := strings.TrimSuffix(strings.TrimPrefix(selector, "./"), "/")
+	if sel == "" {
 		return repos, nil
 	}
-	sel := strings.TrimSuffix(strings.TrimPrefix(selector, "./"), "/")
 
 	// 1. exact relative path
 	for _, r := range repos {
