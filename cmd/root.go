@@ -57,6 +57,7 @@ func newRootCmd() *cobra.Command {
 		newInitCmd(),
 		newConfigCmd(),
 		newResolveCmd(),
+		newShellInitCmd(),
 	)
 	return root
 }
@@ -83,6 +84,53 @@ func ExecuteWith(stdout, stderr io.Writer, args []string) int {
 	// The flag variables are reset for free: pflag writes the default value
 	// through the pointer at registration, and newRootCmd registers afresh
 	// on every call.
+	err := root.Execute()
+	if err == nil {
+		return exitCode
+	}
+	fmt.Fprintf(stderr, "grove: %v\n", err)
+	return ExitError
+}
+
+// ExecuteAsGitSubcommand runs grove against the real standard streams and
+// os.Args, under its git-subcommand identity: help text reads "git grove ..."
+// rather than "grove ...", which is how the user actually invoked it — git
+// treats any git-grove executable on PATH as the subcommand `git grove`, and
+// strips "grove" itself before invoking it, so args here start after it.
+func ExecuteAsGitSubcommand() int {
+	return executeAsGitSubcommandWith(os.Stdout, os.Stderr, os.Args[1:])
+}
+
+// executeAsGitSubcommandWith is ExecuteAsGitSubcommand with its streams and
+// arguments parameterised, mirroring the Execute/ExecuteWith split above and
+// for the same two reasons: it is what the tests use, since os.Args and
+// os.Stdout cannot be swapped out from inside one, and exitCode/errOut are
+// reset here rather than trusted to start clean, for the reason ExecuteWith
+// already documents below.
+//
+// Renaming the command is done through cobra's CommandDisplayNameAnnotation,
+// not by overwriting root.Use. Cobra's Name() — which CommandPath() and
+// UseLine() build on for every subcommand — takes only the first
+// space-separated word of Use, so Use = "git grove" actually displays as
+// just "git" everywhere but the root's own usage line, dropping "grove"
+// entirely from "grove status --help" and printing "git status" (the name of
+// a real, different git command) instead of "git grove status". The
+// annotation is what cobra 1.10 added for exactly this — a command invoked
+// under another program's name — and it correctly reaches every subcommand:
+// "git grove status --help" rather than "git status --help".
+func executeAsGitSubcommandWith(stdout, stderr io.Writer, args []string) int {
+	exitCode = ExitOK
+	errOut = stderr
+
+	root := newRootCmd()
+	if root.Annotations == nil {
+		root.Annotations = map[string]string{}
+	}
+	root.Annotations[cobra.CommandDisplayNameAnnotation] = "git grove"
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	root.SetArgs(args)
+
 	err := root.Execute()
 	if err == nil {
 		return exitCode
