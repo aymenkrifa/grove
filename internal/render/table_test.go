@@ -125,6 +125,67 @@ func TestTableGoldenASCII(t *testing.T) {
 	}
 }
 
+// The colour golden. Written from the constants rather than from raw bytes so
+// that it says which colour goes where, and paired with TestEscapeConstants,
+// which pins what each constant is. Every other colour test here is indirect —
+// Contains, or stripping the escapes back off — and none of them would notice
+// an escape emitted in the wrong place on the line.
+func TestTableGoldenColor(t *testing.T) {
+	o := opts()
+	o.Color = true
+	want := blue + "api" + reset + "\n" +
+		"  gateway    " + dim + "main" + reset + "     " +
+		yellow + "~3" + reset + " " + yellow + "+1" + reset + " " + yellow + "?4" + reset + " " +
+		red + "!2" + reset + " " + dim + "$5" + reset + "  " +
+		dim + "↑0 ↓0" + reset + "\n" +
+		"  billing    " + dim + "develop" + reset + "  " +
+		green + "clean" + reset + "           " + cyan + "↑2 ↓0" + reset + "\n" +
+		blue + "web" + reset + "\n" +
+		"  dashboard  " + dim + "main" + reset + "     " +
+		green + "clean" + reset + "           " + dim + "-" + reset + "\n" +
+		"\n" +
+		dim + "3 repos · 1 dirty · 1 ahead · 0 behind" + reset + "\n"
+	if got := render(t, goldenSample(), o); got != want {
+		t.Errorf("Table() =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// A group heading is a row of one cell, so it must not widen the name column:
+// under a heading longer than any of its members, every row would be pushed
+// right by the difference. Every other fixture here has a member name longer
+// than its heading, which cannot show the difference.
+func TestTableGoldenHeadingLongerThanItsMembers(t *testing.T) {
+	repos := []git.Repo{
+		{Path: "infrastructure/k8s", Group: "infrastructure", Branch: "main", Upstream: "origin/main", Clean: true},
+	}
+	want := "infrastructure\n" +
+		"  k8s  main  clean  ↑0 ↓0\n" +
+		"\n" +
+		"1 repos · 0 dirty · 0 ahead · 0 behind\n"
+	if got := render(t, repos, opts()); got != want {
+		t.Errorf("Table() =\n%q\nwant\n%q", got, want)
+	}
+}
+
+// Columns are counted in characters, not bytes. Nothing else in the suite puts
+// a multi-byte string in a column that gets padded — the arrows live in the
+// last column, which never does — so nothing else would notice a repo whose
+// name is five bytes longer than it is wide.
+func TestTableGoldenNonASCII(t *testing.T) {
+	repos := []git.Repo{
+		{Path: "web/crème-brûlée", Group: "web", Branch: "feat/café", Upstream: "origin/feat/café", Untracked: 2},
+		{Path: "web/api", Group: "web", Branch: "main", Upstream: "origin/main", Ahead: 1, Clean: true},
+	}
+	want := "web\n" +
+		"  crème-brûlée  feat/café  ?2     ↑0 ↓0\n" +
+		"  api           main       clean  ↑1 ↓0\n" +
+		"\n" +
+		"2 repos · 1 dirty · 1 ahead · 0 behind\n"
+	if got := render(t, repos, opts()); got != want {
+		t.Errorf("Table() =\n%q\nwant\n%q", got, want)
+	}
+}
+
 // No line may end in whitespace: the last column is unpadded, but the padding
 // of an empty cell before it would otherwise trail off the end of the line.
 func TestTableHasNoTrailingWhitespace(t *testing.T) {
