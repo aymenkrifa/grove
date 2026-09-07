@@ -34,8 +34,27 @@ func TestBranchPrefix(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := branchPrefix(tt.branch, tt.pattern); got != tt.want {
+			if got := branchPrefix(prefixMatcher(tt.pattern), tt.branch); got != tt.want {
 				t.Errorf("branchPrefix(%q, %q) = %q, want %q", tt.branch, tt.pattern, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPrefixMatcher(t *testing.T) {
+	// A nil matcher is how "there is no usable pattern" travels; the two ways
+	// of getting one are a pattern that is missing and a pattern that is wrong.
+	for _, tt := range []struct {
+		name, pattern string
+		wantNil       bool
+	}{
+		{"empty", "", true},
+		{"unparseable", "[A-Z", true},
+		{"usable", `[A-Z]+-[0-9]+`, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := prefixMatcher(tt.pattern); (got == nil) != tt.wantNil {
+				t.Errorf("prefixMatcher(%q) = %v, want nil == %v", tt.pattern, got, tt.wantNil)
 			}
 		})
 	}
@@ -58,8 +77,9 @@ func TestGroupOf(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := groupOf(r, tt.display); got != tt.want {
-				t.Errorf("groupOf() = %q, want %q", got, tt.want)
+			got := heading(r, tt.display, prefixMatcher(tt.display.BranchPrefix))
+			if got != tt.want {
+				t.Errorf("heading() = %q, want %q", got, tt.want)
 			}
 		})
 	}
