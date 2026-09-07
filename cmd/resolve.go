@@ -25,6 +25,11 @@ import (
 // the shell hook runs *before* it knows whether git matters at all. Requiring
 // git on PATH here would make the hook itself unusable on a machine that
 // somehow has grove but not git, for no benefit: nothing below calls git.
+//
+// Both forms answer the same question, so both enforce the same rule below.
+// The cheaper form (no --scope, no walk) is what a shell whose command
+// substitution cannot report an exit status uses as its in-grove probe — see
+// hooks/fish.fish — which only works if it is exactly as strict as --scope.
 func newResolveCmd() *cobra.Command {
 	var scope bool
 	c := &cobra.Command{
@@ -44,19 +49,37 @@ func newResolveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// The bare cwd fallback does not count: the hook must only fire
-			// inside a grove the user actually configured or marked, never in
-			// any random directory. config.Resolved.Source carries which
-			// precedence rule matched; "working directory" is rule 6, the
-			// fallthrough that applies everywhere.
-			if res.Source == "working directory" {
+			rel, inside := relWithin(res.Root, cwd)
+			// There are two distinct ways to be outside a grove, and the hook
+			// must refuse in both.
+			//
+			// The bare cwd fallback does not count: rule 6 resolves any
+			// directory on the machine to itself, so accepting it would arm
+			// the hook everywhere. config.Resolved.Source carries which
+			// precedence rule matched; "working directory" is rule 6's exact
+			// string.
+			//
+			// Nor is a resolved root necessarily an ancestor of cwd. Rule 2
+			// ($GROVE_ROOT) and rule 5 (the configured default workspace)
+			// never consult cwd at all, so both hand back a root the user may
+			// be nowhere near — only rules 3 and 4 find the root *from* cwd.
+			// Answering in that case makes the hook rewrite `git status` in
+			// an unrelated directory into a report about a tree the user is
+			// not in: git lying about the working directory, which is the
+			// worst outcome this project has.
+			if res.Source == "working directory" || !inside {
 				return errors.New("not inside a configured grove")
 			}
 			if !scope {
 				fmt.Fprintln(cmd.OutOrStdout(), res.Root)
 				return nil
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), scopeFor(res, cwd))
+			// Stdout only, and nothing else on it: the hook reads this
+			// through a command substitution, so a diagnostic printed here
+			// would be parsed as a selector, and a selector printed on stderr
+			// would silently become the empty one — reporting the whole grove
+			// where the user asked about one group.
+			fmt.Fprintln(cmd.OutOrStdout(), scopeFor(res, rel))
 			return nil
 		},
 	}
@@ -64,25 +87,45 @@ func newResolveCmd() *cobra.Command {
 	return c
 }
 
-// scopeFor turns the working directory into a selector, or "" when the whole
+// relWithin reports whether cwd is root itself or lives beneath it, and
+// returns the slash-separated path from root to cwd when it does.
+//
+// It is one function rather than a call to config.isWithin followed by a
+// separate filepath.Rel because the two callers need different halves of the
+// same answer — the command needs the boolean, scopeFor needs the path — and
+// computing the same relationship twice is how the two answers drift apart.
+// config.isWithin stays unexported for the same reason: exporting it would
+// widen config's API for a predicate that on its own answers only half of
+// what this file asks.
+func relWithin(root, cwd string) (string, bool) {
+	rel, err := filepath.Rel(root, cwd)
+	if err != nil {
+		return "", false
+	}
+	// The escape marker is the whole first segment, not the first two
+	// characters: a directory genuinely inside the grove but named "..cache"
+	// also starts with "..". Same test as config.isWithin.
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
+}
+
+// scopeFor turns rel — the path from the grove root down to the working
+// directory, as relWithin returns it — into a selector, or "" when the whole
 // grove is meant. A subdirectory that no repository lives under yields "", so
 // the hook degrades to showing everything rather than erroring.
-func scopeFor(res *config.Resolved, cwd string) string {
-	rel, err := filepath.Rel(res.Root, cwd)
-	// A root chosen by GROVE_ROOT or a default workspace need not be an
-	// ancestor of cwd at all, so an escaping "rel" is a real case here, not
-	// just defensive. The check mirrors config.isWithin: testing only for a
-	// ".." *prefix* would also reject a legitimate sibling whose name merely
-	// starts with two dots, such as "..cache".
-	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+func scopeFor(res *config.Resolved, rel string) string {
+	if rel == "." {
 		return ""
 	}
-	rel = filepath.ToSlash(rel)
 	found, _, err := discover.Walk(res.Root, res.Depth, res.Ignore)
 	if err != nil {
 		return ""
 	}
 	for _, f := range found {
+		// rel+"/" rather than rel: a group directory named "we" must not
+		// claim the repositories that live under its sibling "web".
 		if f.RelPath == rel || strings.HasPrefix(f.RelPath, rel+"/") {
 			return rel
 		}
