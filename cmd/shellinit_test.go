@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -95,5 +96,29 @@ func TestExecuteAsGitSubcommandResetsState(t *testing.T) {
 	buf.Reset()
 	if code := executeAsGitSubcommandWith(&buf, &buf, []string{"status", "--root", clean}); code != ExitOK {
 		t.Errorf("second run exit = %d, want %d — the partial failure leaked\n%s", code, ExitOK, buf.String())
+	}
+}
+
+// TestExecuteAsGitSubcommandRoutesWarningsToStderr pins the errOut wiring in
+// executeAsGitSubcommandWith. errOut is package state: without the assignment
+// this entry point inherits whatever the last run left behind — os.Stderr by
+// default — and the walk's warnings would bypass the caller's streams
+// entirely, landing in the terminal even when `git grove status --json` is
+// being piped into a script. Both other tests here pass the same buffer for
+// stdout and stderr and so cannot see it.
+func TestExecuteAsGitSubcommandRoutesWarningsToStderr(t *testing.T) {
+	root := workspace(t)
+	lockDir(t, filepath.Join(root, "vault"))
+
+	var stdout, stderr bytes.Buffer
+	code := executeAsGitSubcommandWith(&stdout, &stderr, []string{"status", "--root", root})
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitOK, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "grove: warning:") || !strings.Contains(stderr.String(), "vault") {
+		t.Errorf("the walk's warning did not reach the caller's stderr:\n%s", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "vault") {
+		t.Errorf("the warning was written into the table on stdout:\n%s", stdout.String())
 	}
 }

@@ -124,3 +124,50 @@ func TestConfigShowResolutionSource(t *testing.T) {
 		}
 	})
 }
+
+// lockDir makes dir unreadable and restores it before TempDir's own cleanup
+// runs — cleanups are LIFO, and a 0000 directory cannot be removed.
+func lockDir(t *testing.T, dir string) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root can read a 0000 directory, so there is nothing to warn about")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+}
+
+// TestInitWarnsAboutUnreadableSubtrees covers init's own warning routing,
+// which nothing else reaches: init does not go through resolveAndFind, so it
+// carries a second copy of the "print the walk's warnings, then carry on"
+// rule. The repository count it writes into the marker comes from that same
+// walk, so a subtree it could not read is exactly the case where the count
+// silently under-reports — the warning is the only notice the user gets.
+func TestInitWarnsAboutUnreadableSubtrees(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "cfg"))
+	testutil.NewRepo(t, filepath.Join(root, "api", "gateway"), testutil.WithCommit())
+	lockDir(t, filepath.Join(root, "vault"))
+
+	stdout, stderr, code := runSplit(t, "init", root)
+	if code != ExitOK {
+		t.Fatalf("exit = %d, want %d — an unreadable subtree does not stop init\nstderr: %s",
+			code, ExitOK, stderr)
+	}
+	if !strings.Contains(stderr, "grove: warning:") || !strings.Contains(stderr, "vault") {
+		t.Errorf("no warning about the unreadable directory on stderr:\n%s", stderr)
+	}
+	if strings.Contains(stdout, "vault") {
+		t.Errorf("the warning was written to stdout:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "wrote ") {
+		t.Errorf("init did not report writing the marker:\n%s", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(root, config.MarkerName)); err != nil {
+		t.Errorf("marker not written despite the warning: %v", err)
+	}
+}
