@@ -6,7 +6,13 @@ import (
 	"testing"
 )
 
+// Resolve reads $GROVE_ROOT from the process environment, so every test that
+// calls it pins the variable. Without this the fixtures only steer the outcome
+// when the developer running the suite happens not to have GROVE_ROOT exported.
+
 func TestResolvePrecedence(t *testing.T) {
+	t.Setenv("GROVE_ROOT", "")
+
 	dir := t.TempDir()
 	marked := filepath.Join(dir, "marked")
 	nested := filepath.Join(marked, "a", "b")
@@ -56,6 +62,8 @@ func TestResolvePrecedence(t *testing.T) {
 }
 
 func TestResolveUnknownWorkspaceIsAnError(t *testing.T) {
+	t.Setenv("GROVE_ROOT", "")
+
 	cfg := defaults()
 	if _, err := Resolve(&cfg, Opts{Workspace: "nope", Cwd: t.TempDir()}); err == nil {
 		t.Fatal("Resolve() with an unknown workspace should error")
@@ -63,6 +71,8 @@ func TestResolveUnknownWorkspaceIsAnError(t *testing.T) {
 }
 
 func TestResolveMarkerOverridesDepth(t *testing.T) {
+	t.Setenv("GROVE_ROOT", "")
+
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, MarkerName), []byte("depth = 7\n"), 0o644); err != nil {
 		t.Fatal(err)
