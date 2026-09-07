@@ -125,3 +125,74 @@ func TestExecSelectorNarrowsRepos(t *testing.T) {
 		t.Errorf("selector 'web' should include web/dashboard\n%s", out)
 	}
 }
+
+// TestExecRejectsMultipleSelectors matches status/list/branch/fetch/log,
+// which all reject a second positional argument before -- rather than
+// silently using only the first.
+func TestExecRejectsMultipleSelectors(t *testing.T) {
+	root := workspace(t)
+	_, code := run(t, "exec", "--root", root, "web", "api", "--", "pwd")
+	if code != ExitError {
+		t.Errorf("exit = %d, want %d for two selector arguments", code, ExitError)
+	}
+}
+
+// TestExecPrintsARepoHeaderBeforeRunningTheCommand deliberately runs a
+// command ("echo ran") whose own output never contains the repository path,
+// so the header line is the *only* possible source of "api/gateway" and
+// "web/dashboard" in the output. The other exec tests all run "pwd", whose
+// own stdout already contains the path — deleting the header line at
+// cmd/exec.go would not fail any of them.
+func TestExecPrintsARepoHeaderBeforeRunningTheCommand(t *testing.T) {
+	root := workspace(t)
+	out, code := run(t, "exec", "--root", root, "--", "echo", "ran")
+	if code != ExitOK {
+		t.Fatalf("exit = %d\n%s", code, out)
+	}
+	for _, want := range []string{"api/gateway", "web/dashboard"} {
+		if !hasLine(out, want) {
+			t.Errorf("missing a header line naming %q\n%s", want, out)
+		}
+	}
+	if got := strings.Count(out, "ran"); got != 2 {
+		t.Errorf("expected the command's own output (\"ran\") twice, got %d\n%s", got, out)
+	}
+}
+
+// TestExecErrorsGoToStderr pins the stream-placement rule: a per-repo
+// failure message must land on stderr, never mixed into the command's own
+// stdout, so `grove exec -- <cmd> 2>/dev/null` shows only real output.
+func TestExecErrorsGoToStderr(t *testing.T) {
+	root := workspace(t)
+	_, stderr, code := runSplit(t, "exec", "--root", root, "--keep-going", "--", "false")
+	if code != ExitPartial {
+		t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitPartial, stderr)
+	}
+	if !strings.Contains(stderr, "api/gateway") && !strings.Contains(stderr, "web/dashboard") {
+		t.Errorf("expected at least one per-repo error on stderr\n%s", stderr)
+	}
+}
+
+// TestExecChildsOwnStderrGoesToStderr closes a real gap found by mutating
+// past the tests above: TestExecErrorsGoToStderr only exercises grove's OWN
+// diagnostic line (written via cmd.ErrOrStderr() directly), not the
+// sub.Stderr wiring for the child command's own stderr output. Routing
+// sub.Stderr to stdout instead survived every existing test, because "false"
+// writes nothing of its own to either stream. A command that writes a
+// distinct, recognisable line to its own stderr makes the wiring observable.
+func TestExecChildsOwnStderrGoesToStderr(t *testing.T) {
+	root := workspace(t)
+	stdout, stderr, code := runSplit(t, "exec", "--root", root, "--", "sh", "-c", "echo to-stdout; echo to-stderr 1>&2")
+	if code != ExitOK {
+		t.Fatalf("exit = %d\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "to-stdout") {
+		t.Errorf("the child's stdout should reach grove's stdout\n%s", stdout)
+	}
+	if strings.Contains(stdout, "to-stderr") {
+		t.Errorf("the child's OWN stderr must not leak into grove's stdout\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "to-stderr") {
+		t.Errorf("the child's own stderr should reach grove's stderr\n%s", stderr)
+	}
+}

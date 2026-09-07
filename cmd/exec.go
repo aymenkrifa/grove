@@ -28,6 +28,9 @@ func newExecCmd() *cobra.Command {
 			if n < 0 || n >= len(args) {
 				return errors.New("no command given; usage: grove exec [selector] -- <command> [args...]")
 			}
+			if n > 1 {
+				return fmt.Errorf("at most one selector is allowed before --, got %d: %v", n, args[:n])
+			}
 			selector := firstArg(args[:n])
 			argv := args[n:]
 
