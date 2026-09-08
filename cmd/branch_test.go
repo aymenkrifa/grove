@@ -162,11 +162,17 @@ func TestBranchReportsTheErrorOnStderr(t *testing.T) {
 	}
 	// git's own words, not just the path: "(error)" already carries as much
 	// as a bare path would.
-	if !strings.Contains(stderr, "nonexistent-grove-target") {
+	//
+	// Assert on the part of the message that is stable across git versions.
+	// git 2.43 echoes the missing gitdir ("not a git repository:
+	// /nonexistent-grove-target") while newer versions print "(null)" in its
+	// place, so asserting on the path passed locally and failed in CI.
+	const gitsWords = "not a git repository"
+	if !strings.Contains(stderr, gitsWords) {
 		t.Errorf("stderr does not carry git's own message, so the user still cannot "+
 			"tell what went wrong:\n%s", stderr)
 	}
-	if strings.Contains(stdout, "nonexistent-grove-target") {
+	if strings.Contains(stdout, gitsWords) {
 		t.Errorf("the message must not land in the listing:\n%s", stdout)
 	}
 	if !strings.Contains(stdout, "api/gateway") {
