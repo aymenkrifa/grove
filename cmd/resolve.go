@@ -98,6 +98,18 @@ func newResolveCmd() *cobra.Command {
 // widen config's API for a predicate that on its own answers only half of
 // what this file asks.
 func relWithin(root, cwd string) (string, bool) {
+	// Resolve both sides before comparing. On macOS /var is a symlink to
+	// /private/var, so os.Getwd() hands back the resolved path while a
+	// configured root keeps the one the user typed — and the two then fail to
+	// match despite naming the same directory. The visible symptom is the
+	// worst one this tool has: the git hook silently declines to fire, and a
+	// workspace reached through any symlink looks like no grove at all.
+	//
+	// EvalSymlinks fails on a path that does not exist, which is not this
+	// function's business to judge, so an unresolvable side falls back to
+	// itself and the comparison proceeds on the literal paths.
+	root, cwd = resolved(root), resolved(cwd)
+
 	rel, err := filepath.Rel(root, cwd)
 	if err != nil {
 		return "", false
@@ -109,6 +121,15 @@ func relWithin(root, cwd string) (string, bool) {
 		return "", false
 	}
 	return filepath.ToSlash(rel), true
+}
+
+// resolved follows symlinks, falling back to the path itself when it cannot
+// — a path that does not exist is not a reason to refuse to compare.
+func resolved(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return p
 }
 
 // scopeFor turns rel — the path from the grove root down to the working

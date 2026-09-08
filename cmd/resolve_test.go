@@ -122,6 +122,20 @@ func TestResolveFailsOutsideAnyGrove(t *testing.T) {
 	}
 }
 
+// realPath resolves symlinks the way os.Getwd does, so a test can compare a
+// path grove printed against one the test created. On macOS /var is a symlink
+// to /private/var: t.TempDir() hands back the unresolved form while anything
+// derived from the working directory comes back resolved, and comparing the
+// two fails on that platform alone.
+func realPath(t *testing.T, p string) string {
+	t.Helper()
+	r, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return p
+	}
+	return r
+}
+
 // TestResolveWithoutScopePrintsTheRoot covers the other flag state: without
 // --scope the whole resolved root is printed, not a selector.
 func TestResolveWithoutScopePrintsTheRoot(t *testing.T) {
@@ -131,8 +145,8 @@ func TestResolveWithoutScopePrintsTheRoot(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit = %d\n%s", code, out)
 	}
-	if strings.TrimSpace(out) != root {
-		t.Errorf("root = %q, want %q", strings.TrimSpace(out), root)
+	if want := realPath(t, root); strings.TrimSpace(out) != want {
+		t.Errorf("root = %q, want %q", strings.TrimSpace(out), want)
 	}
 }
 
@@ -299,8 +313,8 @@ func TestResolveScopeGoesToStdoutOnly(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit = %d\n%s%s", code, stdout, stderr)
 	}
-	if stdout != root+"\n" {
-		t.Errorf("stdout = %q, want %q", stdout, root+"\n")
+	if want := realPath(t, root) + "\n"; stdout != want {
+		t.Errorf("stdout = %q, want %q", stdout, want)
 	}
 	if stderr != "" {
 		t.Errorf("stderr = %q, want nothing", stderr)
@@ -393,5 +407,63 @@ func TestResolveScopeAtAGroveThatIsItselfARepo(t *testing.T) {
 	}
 	if got := strings.TrimSpace(out); got != "" {
 		t.Errorf("scope = %q, want empty — the root itself is the whole grove", got)
+	}
+}
+
+// A grove reached through a symlink is still that grove. macOS makes this the
+// default case — /var is a symlink to /private/var, so os.Getwd() resolves it
+// while a configured root does not — and it broke every containment check on
+// that platform: the hook silently declined to fire, which is the worst
+// failure this tool has.
+func TestRelWithinResolvesSymlinks(t *testing.T) {
+	real := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(real, "api"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		root, cwd  string
+		wantRel    string
+		wantWithin bool
+	}{
+		{"root via link, cwd real", link, real, ".", true},
+		{"root real, cwd via link", real, link, ".", true},
+		{"subdirectory through the link", real, filepath.Join(link, "api"), "api", true},
+		{"root via link, subdirectory real", link, filepath.Join(real, "api"), "api", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rel, ok := relWithin(tt.root, tt.cwd)
+			if ok != tt.wantWithin {
+				t.Fatalf("within = %v, want %v (root %q, cwd %q)", ok, tt.wantWithin, tt.root, tt.cwd)
+			}
+			if rel != tt.wantRel {
+				t.Errorf("rel = %q, want %q", rel, tt.wantRel)
+			}
+		})
+	}
+}
+
+// Resolving must not turn a genuine escape into a match.
+func TestRelWithinStillRejectsAnEscapeThroughASymlink(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "root")
+	outside := filepath.Join(base, "outside")
+	for _, d := range []string{root, outside} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(base, "link-to-outside")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, ok := relWithin(root, link); ok {
+		t.Error("a symlink pointing outside the grove must not be treated as inside it")
 	}
 }
