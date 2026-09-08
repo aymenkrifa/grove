@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/aymenkrifa/grove/internal/git"
+	"github.com/aymenkrifa/grove/internal/render"
 )
 
 func newDiffCmd() *cobra.Command {
@@ -62,6 +63,7 @@ func newDiffCmd() *cobra.Command {
 				return page(out, body)
 			}
 
+			ropts := renderOptions(res, out)
 			var b strings.Builder
 			for _, f := range found {
 				gitArgs := append([]string{"diff", "--stat", colorArg}, passthrough...)
@@ -77,7 +79,15 @@ func newDiffCmd() *cobra.Command {
 				if strings.TrimSpace(body) == "" {
 					continue // nothing changed here
 				}
-				fmt.Fprintf(&b, "%s\n%s\n", f.RelPath, body)
+				// A blank line before every heading but the first: the
+				// blocks are separate documents and reading them as one
+				// wall of stat output is the thing the banner exists to
+				// prevent.
+				if b.Len() > 0 {
+					b.WriteString("\n")
+				}
+				b.WriteString(render.RepoHeading(f.RelPath, body, ropts))
+				b.WriteString(body)
 			}
 			return page(out, b.String())
 		},
