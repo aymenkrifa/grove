@@ -32,6 +32,6 @@ jobs:
           go build -ldflags "-s -w -X github.com/aymenkrifa/grove/cmd.version=${GITHUB_REF_NAME}" -o "dist/$out/git-grove" ./cmd/git-grove
           cp README.md LICENSE "dist/$out/"
           tar -C dist -czf "dist/$out.tar.gz" "$out"
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*.tar.gz
