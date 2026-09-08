@@ -15,6 +15,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+      # The hook matrix runs grove's real git wrapper in each shell it ships,
+      # and skips any shell that is not installed. zsh and bash are present on
+      # both runners; fish is on neither, so the fish hook shipped without ever
+      # being executed anywhere. Fifteen seconds here turns the project's
+      # largest residual risk into a job step.
+      - name: Install fish, so the fish hook is actually exercised
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y fish
       - run: go vet ./...
       - run: go test -race ./...
       - run: go build ./...

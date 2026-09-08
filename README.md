@@ -30,14 +30,20 @@ The `...` installs both `grove` and `git-grove`. The second is what makes
 `git grove status` work as a native git subcommand, from any directory — see
 below.
 
+**Linux and macOS only.** Windows is unsupported — not merely untested:
+release binaries are published for linux and darwin, and the test suite is
+POSIX-only (it builds fixtures with `?` and `"` in filenames, uses symlinks,
+and sends real signals). A Windows binary would be a promise nothing here can
+back, so none is shipped.
+
 ## Use
 
 ```bash
-grove status                  # every repository under the current root
+grove status                  # every repository under the current root (alias: st)
 grove status -d               # only what needs attention
 grove status --json           # machine-readable
-grove list                    # every repository grove can see
-grove branch                  # who is on which branch
+grove list                    # every repository grove can see  (alias: ls)
+grove branch                  # who is on which branch          (alias: br)
 grove diff                    # per-repository diffstat
 grove diff gateway            # the full diff for one repository
 grove fetch                   # refresh divergence numbers, concurrently
@@ -54,12 +60,23 @@ $ grove status e
 grove: "e" is ambiguous — it matches api/auth-service, api/gateway, web/dashboard, web/landing
 ```
 
-Every command accepts `--root`, `-w`/`--workspace`, `--color auto|always|never`,
-`--jobs`, and `--ascii` (plain-text symbols in place of the unicode ones). Most
-also take `--json` for scripting; run `grove <command> --help` for the exact
-flags — `status`, `list` and `branch` share little beyond the selector, and
-`diff`, `fetch`, `log` and `exec` each add flags of their own (`diff --stat`,
-`fetch --prune`, `log --since`/`--author`/`-n`, `exec --dry-run`/`--keep-going`).
+Five flags are accepted by every command, but only two of them do something
+everywhere:
+
+| Flag | Honoured by |
+|---|---|
+| `--root`, `-w`/`--workspace` | every command — they choose which repositories are in scope |
+| `--jobs` | `status`, `branch`, `fetch` — the three that run git concurrently |
+| `--color auto\|always\|never`, `--ascii` | `status` — the only command with a rendered, coloured table |
+
+On `list`, `diff`, `log` and `exec` the last three have nothing to act on and
+are silently inert. An invalid `--color` is still rejected everywhere, so a
+typo is an error rather than a colourless table.
+
+Most commands also take `--json` for scripting; run `grove <command> --help`
+for the exact flags — `diff`, `fetch`, `log` and `exec` each add flags of their
+own (`diff --stat`, `fetch --prune`, `log --since`/`--author`/`-n`,
+`exec --dry-run`/`--keep-going`).
 
 ## Configuration
 
@@ -149,6 +166,13 @@ git grove status
 eval "$(grove shell-init zsh)"     # or bash; for fish: grove shell-init fish | source
 ```
 
+All three wrappers are exercised end to end rather than merely embedded: the
+test suite loads the hook into a real zsh, bash and fish and reads back the
+exact argument vectors `git` and `grove` were invoked with, including the cases
+that must *not* forward. fish runs on the Linux CI leg only — the macOS runner
+has no fish — so if you drive the fish wrapper on macOS and anything looks odd,
+please report it.
+
 ```
 ~/work $ git status
 → grove status
@@ -177,6 +201,15 @@ grove never changes a working tree. There is no `pull`, `push`, `checkout` or
 `commit`; `fetch` is the only network command, and it touches no files. This is
 deliberate, not a missing feature: anything that mutates goes through
 `grove exec`, where you type the command yourself and grove only fans it out.
+
+One honest caveat, because "touches nothing" would be too strong: every git
+command grove runs is passed `--no-optional-locks`, which stops git refreshing
+and rewriting a repository's `.git/index` behind your back. git honours that
+for `status`, and `log` never reads the index at all — but `git diff` refreshes
+the index regardless (measured on git 2.43), so `grove diff` can rewrite
+`.git/index` exactly as running `git diff` by hand would. That is a cache
+git maintains for its own speed; no tracked content, ref or working-tree file
+is touched.
 
 ```bash
 grove exec --dry-run -- git pull --ff-only   # see what would run, and where
