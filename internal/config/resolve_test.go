@@ -408,3 +408,55 @@ func TestResolveNoDefaultStillFallsThroughToCwd(t *testing.T) {
 		t.Errorf("Resolve() = %+v, want rule 6 and the working directory", res)
 	}
 }
+
+// Rule 4 must recognise a workspace that contains the caller even when the two
+// paths differ only by a symlink. macOS makes this the default case, where
+// /var is a symlink to /private/var: os.Getwd() returns the resolved path
+// while a configured root keeps the literal one, and resolution silently fell
+// through to the working-directory rule.
+func TestIsWithinResolvesSymlinks(t *testing.T) {
+	real := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(real, "api"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	cases := []struct {
+		name, path, root string
+		want             bool
+	}{
+		{"real path inside a linked root", real, link, true},
+		{"linked path inside a real root", link, real, true},
+		{"subdirectory reached through the link", filepath.Join(link, "api"), real, true},
+		{"subdirectory of a linked root", filepath.Join(real, "api"), link, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := isWithin(c.path, c.root); got != c.want {
+				t.Errorf("isWithin(%q, %q) = %v, want %v", c.path, c.root, got, c.want)
+			}
+		})
+	}
+}
+
+// Resolving must not turn a genuine escape into containment.
+func TestIsWithinStillRejectsALinkPointingOutside(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "root")
+	outside := filepath.Join(base, "outside")
+	for _, d := range []string{root, outside} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(base, "escape")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if isWithin(link, root) {
+		t.Error("a symlink pointing outside the root must not count as inside it")
+	}
+}

@@ -159,7 +159,15 @@ func containingWorkspace(cfg *Config, cwd string) (Workspace, bool) {
 }
 
 // isWithin reports whether path is root or lives beneath it.
+//
+// Both sides are resolved first. On macOS /var is a symlink to /private/var,
+// so a working directory comes back resolved from os.Getwd() while a
+// configured root keeps whatever the user wrote — and rule 4 then fails to
+// recognise a workspace that plainly contains the caller. An unresolvable
+// path falls back to itself: whether it exists is not this predicate's
+// question.
 func isWithin(path, root string) bool {
+	path, root = evalSymlinks(path), evalSymlinks(root)
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		return false
@@ -168,4 +176,13 @@ func isWithin(path, root string) bool {
 	// name merely begins with two dots, such as "..cache": the escape marker is
 	// the whole first segment, not the first two characters.
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// evalSymlinks follows symlinks, falling back to the path itself when it
+// cannot be resolved.
+func evalSymlinks(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return p
 }
