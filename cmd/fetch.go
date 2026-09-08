@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"fmt"
+	"io"
+	"strings"
 	"sync"
 
 	"github.com/spf13/cobra"
@@ -34,6 +36,12 @@ func newFetchCmd() *cobra.Command {
 			// worker.
 			errs := make([]error, len(found))
 			sem := make(chan struct{}, jobs)
+			// done carries one token per finished repository. Workers must not
+			// print: they would race on the writer, and the rule everywhere
+			// else in grove is that only this goroutine writes diagnostics.
+			// Sending a token instead keeps the counter here, where the
+			// summary line is already written.
+			done := make(chan struct{}, len(found))
 			var wg sync.WaitGroup
 			for i, f := range found {
 				wg.Add(1)
@@ -42,9 +50,21 @@ func newFetchCmd() *cobra.Command {
 					sem <- struct{}{}
 					defer func() { <-sem }()
 					_, errs[i] = git.Run(cmd.Context(), dir, gitArgs...)
+					done <- struct{}{}
 				}(i, f.AbsPath)
 			}
-			wg.Wait()
+			go func() {
+				wg.Wait()
+				close(done)
+			}()
+
+			prog := newProgress(cmd.ErrOrStderr(), len(found))
+			finished := 0
+			for range done {
+				finished++
+				prog.update(finished)
+			}
+			prog.clear()
 
 			out := cmd.OutOrStdout()
 			ok := 0
@@ -77,4 +97,45 @@ func fetchJobs(flagJobs int) int {
 		return flagJobs
 	}
 	return git.DefaultJobs()
+}
+
+// progress reports how many repositories have been fetched so far, rewriting
+// one line in place.
+//
+// It writes to stderr and only when stderr is a terminal: a fetch whose output
+// is redirected or read by CI should produce the summary line and nothing
+// else, and \r into a log file is noise that no one ever wants. That also
+// keeps it consistent with every other diagnostic grove emits.
+type progress struct {
+	w     io.Writer
+	total int
+	on    bool
+	width int
+}
+
+func newProgress(w io.Writer, total int) *progress {
+	return &progress{w: w, total: total, on: isTerminal(w)}
+}
+
+// update rewrites the counter. The carriage return returns to the start of the
+// line rather than starting a new one, so the count advances in place.
+func (p *progress) update(n int) {
+	if !p.on {
+		return
+	}
+	line := fmt.Sprintf("fetching… %d/%d", n, p.total)
+	if len(line) > p.width {
+		p.width = len(line)
+	}
+	fmt.Fprintf(p.w, "\r%s", line)
+}
+
+// clear wipes the counter so the summary line does not land on top of it.
+// Blanking the widest line it ever drew is what makes that reliable: a shorter
+// final line would otherwise leave the tail of a longer one behind.
+func (p *progress) clear() {
+	if !p.on || p.width == 0 {
+		return
+	}
+	fmt.Fprintf(p.w, "\r%s\r", strings.Repeat(" ", p.width))
 }

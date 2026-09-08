@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -133,5 +134,59 @@ func TestFetchPruneRemovesStaleRemoteTrackingRefs(t *testing.T) {
 	}
 	if strings.Contains(testutil.Run(t, local, "branch", "-r"), "origin/doomed") {
 		t.Errorf("--prune should have removed the stale origin/doomed tracking ref")
+	}
+}
+
+// Progress must never reach a non-terminal writer: a redirected fetch or a CI
+// log should carry the summary line and nothing else, and a carriage return
+// into a file is noise no one wants.
+func TestProgressIsSilentWhenNotATerminal(t *testing.T) {
+	var buf bytes.Buffer
+	p := newProgress(&buf, 26)
+	p.update(1)
+	p.update(7)
+	p.clear()
+	if buf.Len() != 0 {
+		t.Errorf("progress wrote %q to a non-terminal writer, want nothing", buf.String())
+	}
+}
+
+// The counter's shape is the requirement — "3/26", rewritten in place rather
+// than appended as new lines.
+func TestProgressCounterFormat(t *testing.T) {
+	p := &progress{w: nil, total: 26, on: false}
+	var buf bytes.Buffer
+	p.w, p.on = &buf, true
+
+	p.update(1)
+	p.update(3)
+	got := buf.String()
+
+	for _, want := range []string{"1/26", "3/26"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("progress output %q is missing %q", got, want)
+		}
+	}
+	if strings.Contains(got, "\n") {
+		t.Errorf("progress must rewrite one line, but it emitted a newline: %q", got)
+	}
+	if n := strings.Count(got, "\r"); n != 2 {
+		t.Errorf("got %d carriage returns, want one per update: %q", n, got)
+	}
+}
+
+// clear blanks the widest line drawn, not the last one: going from "10/26" to
+// a shorter summary would otherwise leave the tail of the longer line behind.
+func TestProgressClearWipesTheWidestLine(t *testing.T) {
+	var buf bytes.Buffer
+	p := &progress{w: &buf, total: 100, on: true}
+	p.update(100) // the widest line this run will draw
+	buf.Reset()
+	p.clear()
+
+	got := buf.String()
+	wantWidth := len("fetching… 100/100")
+	if spaces := strings.Count(got, " "); spaces < wantWidth {
+		t.Errorf("clear wrote %d spaces, want at least %d to cover %q", spaces, wantWidth, "fetching… 100/100")
 	}
 }
