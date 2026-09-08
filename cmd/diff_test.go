@@ -245,3 +245,62 @@ func TestPageDoesNotInvokeThePagerWhenOutIsNotATerminal(t *testing.T) {
 		t.Errorf("the pager should not run when out is not a terminal (err=%v)", err)
 	}
 }
+
+// git disables colour whenever its stdout is not a terminal, and grove's is
+// always a buffer — so a diff arrives plain unless grove asks for colour
+// explicitly. These pin that grove asks, and that it asks on its own terms.
+func TestDiffPassesAColourModeToGit(t *testing.T) {
+	root := workspace(t)
+	// workspace() pins NO_COLOR for the table tests; this one is about the
+	// colour decision itself, so it has to start from no preference.
+	t.Setenv("NO_COLOR", "")
+
+	// --color=always makes grove's decision "yes" regardless of the buffer it
+	// is writing into, which is what a user forcing colour expects.
+	out, code := run(t, "diff", "--root", root, "--color=always", "gateway")
+	if code != ExitOK {
+		t.Fatalf("exit = %d\n%s", code, out)
+	}
+	if !strings.Contains(out, "\x1b[") {
+		t.Errorf("--color=always produced no escape sequences:\n%q", out)
+	}
+
+	// The default path writes to a buffer, so the decision is "no" and the
+	// output must stay a clean, applyable patch.
+	plain, code := run(t, "diff", "--root", root, "gateway")
+	if code != ExitOK {
+		t.Fatalf("exit = %d\n%s", code, plain)
+	}
+	if strings.Contains(plain, "\x1b[") {
+		t.Errorf("redirected diff must stay plain, got escapes:\n%q", plain)
+	}
+}
+
+// grove's colour flag goes before the passthrough args precisely so the user's
+// own choice after -- still wins: git honours the last one it is given.
+func TestDiffUserColourOverridesGroves(t *testing.T) {
+	root := workspace(t)
+	t.Setenv("NO_COLOR", "")
+	out, code := run(t, "diff", "--root", root, "--color=always", "gateway", "--", "--no-color")
+	if code != ExitOK {
+		t.Fatalf("exit = %d\n%s", code, out)
+	}
+	if strings.Contains(out, "\x1b[") {
+		t.Errorf("`-- --no-color` must override grove's --color=always, got escapes:\n%q", out)
+	}
+}
+
+// NO_COLOR is the standard escape hatch and outranks everything, including an
+// explicit --color=always. The status table already honours it; the diff must
+// not be the one command that ignores it.
+func TestDiffHonoursNoColor(t *testing.T) {
+	root := workspace(t)
+	t.Setenv("NO_COLOR", "1")
+	out, code := run(t, "diff", "--root", root, "--color=always", "gateway")
+	if code != ExitOK {
+		t.Fatalf("exit = %d\n%s", code, out)
+	}
+	if strings.Contains(out, "\x1b[") {
+		t.Errorf("NO_COLOR must beat --color=always, got escapes:\n%q", out)
+	}
+}

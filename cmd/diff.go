@@ -26,11 +26,25 @@ func newDiffCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, found, err := resolveAndFind(selector)
+			res, found, err := resolveAndFind(selector)
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
+
+			// git turns colour off whenever its stdout is not a terminal, and
+			// grove's always is a buffer — so a diff arrives plain unless we
+			// ask. We ask on grove's own terms: the same decision that colours
+			// the status table, which already accounts for --color, NO_COLOR
+			// and whether a human is watching. Redirecting to a file therefore
+			// still yields a clean patch.
+			//
+			// It goes before the passthrough args so a user's own --color or
+			// --no-color after -- still wins: git honours the last one.
+			colorArg := "--color=never"
+			if renderOptions(res, out).Color {
+				colorArg = "--color=always"
+			}
 
 			// A selector that narrows to exactly one repository, and no
 			// --stat: show the real diff. len(found)==1 alone is not enough
@@ -38,7 +52,7 @@ func newDiffCmd() *cobra.Command {
 			// still get the --stat form when no selector was given, per
 			// §5.2 ("without a selector: a per-repo --stat summary").
 			if selector != "" && len(found) == 1 && !statOnly {
-				gitArgs := append([]string{"diff"}, passthrough...)
+				gitArgs := append([]string{"diff", colorArg}, passthrough...)
 				body, err := git.Run(cmd.Context(), found[0].AbsPath, gitArgs...)
 				if err != nil {
 					markPartialFailure()
@@ -50,7 +64,7 @@ func newDiffCmd() *cobra.Command {
 
 			var b strings.Builder
 			for _, f := range found {
-				gitArgs := append([]string{"diff", "--stat"}, passthrough...)
+				gitArgs := append([]string{"diff", "--stat", colorArg}, passthrough...)
 				body, err := git.Run(cmd.Context(), f.AbsPath, gitArgs...)
 				if err != nil {
 					// Diagnostics go to stderr, never into the (possibly
@@ -104,6 +118,13 @@ func page(out io.Writer, body string) error {
 		return err
 	}
 	cmd := exec.Command("sh", "-c", pager)
+	// less renders ANSI as literal garbage unless told otherwise, so a
+	// coloured diff needs -R. git sets exactly this default for exactly this
+	// reason; an LESS the user has set themselves is left alone.
+	cmd.Env = os.Environ()
+	if _, set := os.LookupEnv("LESS"); !set {
+		cmd.Env = append(cmd.Env, "LESS=FRX")
+	}
 	cmd.Stdin = strings.NewReader(body)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
