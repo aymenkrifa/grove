@@ -42,6 +42,27 @@ type Display struct {
 // MarkerName is the per-directory workspace marker file.
 const MarkerName = ".grove.toml"
 
+// ValidateColor rejects a colour mode outside the three the spec enumerates
+// (§4.2). what names where the value came from, so the message points at the
+// thing to edit rather than at "the colour setting" in the abstract.
+//
+// A misspelling used to fall through to render.UseColor's default arm and
+// behave like "auto", which meant `grove status --color=alwyas` printed a
+// perfectly ordinary uncoloured table and exited 0: the user is told nothing,
+// sees output that looks fine, and concludes their terminal cannot do colour.
+// Silence is only kind when there is nothing to fix.
+//
+// The empty string is accepted deliberately, and is not a fourth mode: it is
+// how both sources spell "unset" — the flag's own default, and a config file
+// that never mentions colour — and both mean "auto" downstream.
+func ValidateColor(what, mode string) error {
+	switch mode {
+	case "", "auto", "always", "never":
+		return nil
+	}
+	return fmt.Errorf("%s is %q, which is not one of auto, always or never", what, mode)
+}
+
 func defaults() Config {
 	return Config{Display: Display{
 		GroupBy:   "dir",
@@ -79,6 +100,12 @@ func Load() (*Config, error) {
 	}
 	if err := toml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	// Validated here rather than where the colour is chosen: a typo in the
+	// config file is exactly as wrong as a typo on the command line, and both
+	// deserve the same answer. The caller names the file, so this does not.
+	if err := ValidateColor("display.color", cfg.Display.Color); err != nil {
+		return nil, err
 	}
 	for i := range cfg.Workspaces {
 		cfg.Workspaces[i].Root = ExpandPath(cfg.Workspaces[i].Root, filepath.Dir(path))

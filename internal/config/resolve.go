@@ -122,6 +122,12 @@ func findMarker(start string, seed Display) (string, marker, bool, error) {
 			if e := toml.Unmarshal(data, &m); e != nil {
 				return "", marker{}, false, fmt.Errorf("parse %s: %w", path, e)
 			}
+			// The marker's [display] override gets the same reading as the
+			// global one: a marker is a workspace, and a typo in its colour
+			// mode is no more something to walk past than a typo in its TOML.
+			if e := ValidateColor("display.color in "+path, m.Display.Color); e != nil {
+				return "", marker{}, false, e
+			}
 			return dir, m, true, nil
 		}
 		parent := filepath.Dir(dir)

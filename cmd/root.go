@@ -46,6 +46,15 @@ func newRootCmd() *cobra.Command {
 	pf.IntVar(&flagJobs, "jobs", 0, "maximum concurrent git processes")
 	pf.BoolVar(&flagASCII, "ascii", false, "use ASCII symbols instead of unicode")
 
+	// On the root rather than on each command, for the same reason --color is
+	// a persistent flag in the first place: seven commands inherit it, and a
+	// check written seven times is a check one command eventually lacks.
+	// Cobra runs the nearest PersistentPreRunE up the chain and no subcommand
+	// defines one, so this is that check for every one of them.
+	root.PersistentPreRunE = func(*cobra.Command, []string) error {
+		return config.ValidateColor("--color", flagColor)
+	}
+
 	root.AddCommand(
 		newStatusCmd(),
 		newListCmd(),

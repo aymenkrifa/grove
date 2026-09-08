@@ -22,10 +22,14 @@ func TestUseColor(t *testing.T) {
 		// empty, whatever it is set to. "0" is not an opt-out.
 		{"NO_COLOR=0 still disables", "always", true, "0", false},
 		{"NO_COLOR=false still disables", "always", true, "false", false},
-		// An unset or misspelled mode is not an error; it behaves like auto,
-		// which is what the config default says.
-		{"an unknown mode follows the tty, on", "", true, "", true},
-		{"an unknown mode follows the tty, off", "sometimes", false, "", false},
+		// An unset mode means auto: it is how both the flag and a config
+		// file that never mentions colour spell "no preference".
+		{"an unset mode follows the tty, on", "", true, "", true},
+		{"an unset mode follows the tty, off", "", false, "", false},
+		// A misspelling never gets this far — config.ValidateColor rejects it
+		// at the edge — so this case pins the arm's totality, not a mode grove
+		// accepts. It used to be the behaviour for "--color=alwyas".
+		{"an unreachable mode still falls back to the tty", "sometimes", false, "", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

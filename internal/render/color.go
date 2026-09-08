@@ -22,8 +22,20 @@ const (
 
 // UseColor decides whether to emit escapes. NO_COLOR, when set to any non-empty
 // value, wins over both the config file and the --color flag — see
-// https://no-color.org. Any mode other than "always" or "never" (including the
-// documented "auto" and an unset value) defers to whether stdout is a terminal.
+// https://no-color.org.
+//
+// The three modes are "always", "never" and "auto", the last meaning "colour
+// when a human is watching" and so deferring to whether stdout is a terminal.
+// An unset value means auto as well: it is how both the flag and a config file
+// that never mentions colour spell "no preference".
+//
+// Nothing else reaches here. config.ValidateColor rejects a fourth spelling at
+// the edge — the flag before the command runs, the file as it is read — so the
+// default arm below is the auto arm rather than a quiet home for typos. It was
+// once exactly that: `--color=alwyas` behaved like auto, printed a plain table
+// and exited 0, leaving the user to conclude their terminal could not do
+// colour. The arm stays total as a defence against a mode arriving from
+// somewhere new, not as a licence for one.
 func UseColor(mode string, isTTY bool) bool {
 	if os.Getenv("NO_COLOR") != "" {
 		return false

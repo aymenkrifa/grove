@@ -963,3 +963,101 @@ func TestReadOnlyCommandsLeaveTheIndexAlone(t *testing.T) {
 		})
 	}
 }
+
+// TestColorFlagIsValidated is the user-visible half of spec §4.2's
+// enumeration. `grove status --color=alwyas` used to exit 0, print a
+// perfectly ordinary uncoloured table and say nothing at all, which reads as
+// "your terminal cannot do colour" rather than "you made a typo".
+//
+// The accepted half of the table is not decoration: a validator that refuses
+// everything satisfies the rejection cases on its own, and --color is
+// inherited by seven commands that would then all be broken.
+func TestColorFlagIsValidated(t *testing.T) {
+	for _, tc := range []struct {
+		mode string
+		want int
+	}{
+		{"auto", ExitOK},
+		{"always", ExitOK},
+		{"never", ExitOK},
+		{"alwyas", ExitError},
+		{"Always", ExitError},
+		{"yes", ExitError},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			root := workspace(t)
+			stdout, stderr, code := runSplit(t, "status", "--root", root, "--color="+tc.mode)
+			if code != tc.want {
+				t.Fatalf("grove status --color=%s: exit = %d, want %d\nstdout: %s\nstderr: %s",
+					tc.mode, code, tc.want, stdout, stderr)
+			}
+			if tc.want == ExitOK {
+				return
+			}
+			// Saying no is half the job; the other half is saying what to
+			// type instead, and not printing a report that looks fine.
+			for _, want := range []string{"--color", tc.mode, "auto", "always", "never"} {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("stderr %q does not mention %q", stderr, want)
+				}
+			}
+			if stdout != "" {
+				t.Errorf("a rejected flag must produce no report, got:\n%s", stdout)
+			}
+		})
+	}
+}
+
+// TestColorIsValidatedOnEveryCommandThatInheritsIt guards the reason the check
+// sits on the root command: --color is persistent, so a check attached to
+// status alone leaves six commands accepting a value none of them can honour.
+func TestColorIsValidatedOnEveryCommandThatInheritsIt(t *testing.T) {
+	for _, args := range [][]string{
+		{"status"}, {"list"}, {"branch"}, {"diff"}, {"log"}, {"fetch"},
+		{"exec", "--dry-run", "--", "true"},
+	} {
+		t.Run(args[0], func(t *testing.T) {
+			root := workspace(t)
+			full := append([]string{}, args...)
+			full = append(full, "--root", root, "--color=alwyas")
+			_, stderr, code := runSplit(t, full...)
+			if code != ExitError {
+				t.Errorf("grove %s --color=alwyas: exit = %d, want %d\n%s",
+					args[0], code, ExitError, stderr)
+			}
+		})
+	}
+}
+
+// TestColorIsValidatedInTheConfigFileAndTheMarker pins the other two places
+// the mode can be written. A flag-only check leaves a typo in a file that is
+// read on every single run silently doing nothing — the worse of the two,
+// since nobody re-reads a config that appears to work.
+func TestColorIsValidatedInTheConfigFileAndTheMarker(t *testing.T) {
+	t.Run("config file", func(t *testing.T) {
+		root := workspace(t)
+		writeConfig(t, "[display]\ncolor = \"alwyas\"\n")
+		_, stderr, code := runSplit(t, "status", "--root", root)
+		if code != ExitError {
+			t.Fatalf("exit = %d, want %d\n%s", code, ExitError, stderr)
+		}
+		if !strings.Contains(stderr, "alwyas") {
+			t.Errorf("stderr does not name the offending value:\n%s", stderr)
+		}
+	})
+	t.Run("marker file", func(t *testing.T) {
+		root := workspace(t)
+		if err := os.WriteFile(filepath.Join(root, config.MarkerName),
+			[]byte("depth = 3\n\n[display]\ncolor = \"nevre\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		chdir(t, root)
+		_, stderr, code := runSplit(t, "status")
+		if code != ExitError {
+			t.Fatalf("exit = %d, want %d\n%s", code, ExitError, stderr)
+		}
+		if !strings.Contains(stderr, "nevre") || !strings.Contains(stderr, config.MarkerName) {
+			t.Errorf("stderr should name both the value and the file holding it:\n%s", stderr)
+		}
+	})
+}
