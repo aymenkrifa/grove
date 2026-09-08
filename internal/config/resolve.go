@@ -80,6 +80,15 @@ func Resolve(cfg *Config, o Opts) (*Resolved, error) {
 				return fromWorkspace(w, cfg.Display, "default workspace "+w.Name), nil
 			}
 		}
+		// A default naming no configured workspace is a typo, and falling
+		// through to rule 6 is the worst possible answer to one: grove reports
+		// on whatever directory the user is standing in, looks like it worked,
+		// and never mentions the setting it ignored. `-w typo` already errors
+		// on the identical mistake, and a marker file that does not parse is
+		// already an error rather than something to walk past — §4.1 exists so
+		// the user can always tell which rule chose the root, and a typo must
+		// not quietly change the answer.
+		return nil, fmt.Errorf("unknown default workspace %q; `grove config show` lists the configured ones", cfg.Default)
 	}
 	// 6. the working directory
 	base.Root = o.Cwd

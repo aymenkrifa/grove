@@ -199,8 +199,20 @@ var errOut io.Writer = os.Stderr
 // resolveAndFind performs the root resolution, the walk, and the selector
 // narrowing that nearly every command needs.
 //
-// Every caller goes on to run git, so the git preflight lives here too: one
-// clear error instead of the same message repeated once per repository.
+// The git preflight lives here rather than in each command so that a missing
+// git is reported once, clearly, instead of once per repository — twenty
+// copies of `exec: "git": executable file not found` in a twenty-repository
+// workspace answer a single mistake twenty times.
+//
+// Not every caller goes on to run git, and this used to claim they did. `list`
+// only walks the filesystem, and `exec` runs whatever command the user typed,
+// which need not be git at all; both fail here anyway. That is a blanket
+// policy rather than an oversight, and a defensible one — grove is a tool for
+// looking at git repositories, so `grove list` on a machine without git
+// answers a question whose answer is about to be useless, and one precondition
+// for the whole command surface is easier to hold in the head than a
+// per-command rule. __resolve is the single exception, and it takes it by not
+// calling this function at all; its own comment says why.
 func resolveAndFind(selector string) (*config.Resolved, []discover.Found, error) {
 	if err := git.Available(); err != nil {
 		return nil, nil, err

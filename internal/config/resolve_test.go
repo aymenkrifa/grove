@@ -347,3 +347,64 @@ func TestIsWithin(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveUnknownDefaultWorkspaceIsAnError closes the asymmetry between the
+// two ways of naming a workspace that does not exist. `-w typo` has always
+// errored; `default = "typo"` fell through to rule 6 and reported on the
+// working directory, so the user got a plausible-looking table from a config
+// setting grove had silently ignored — the same class of mistake, answered two
+// different ways.
+func TestResolveUnknownDefaultWorkspaceIsAnError(t *testing.T) {
+	cfg := &Config{
+		Default:    "wrok",
+		Workspaces: []Workspace{{Name: "work", Root: "/groves/work"}},
+	}
+	res, err := Resolve(cfg, Opts{Cwd: "/somewhere/else"})
+	if err == nil {
+		t.Fatalf("Resolve() = %+v, nil; want an error naming the missing workspace", res)
+	}
+	// The two things the message must carry: what was wrong, and where to look
+	// for the right spelling.
+	if !strings.Contains(err.Error(), "wrok") {
+		t.Errorf("error = %q, want it to quote the unknown name", err)
+	}
+	if !strings.Contains(err.Error(), "config show") {
+		t.Errorf("error = %q, want it to point at `grove config show`", err)
+	}
+}
+
+// TestResolveDefaultWorkspaceStillWorks is the other half, and the mutant it
+// kills is the obvious over-correction: erroring on every configured default
+// rather than only on one that names nothing. Rule 5 is what makes `grove
+// status` work from anywhere, so breaking it would be a far worse bug than the
+// one above.
+func TestResolveDefaultWorkspaceStillWorks(t *testing.T) {
+	cfg := &Config{
+		Default:    "work",
+		Workspaces: []Workspace{{Name: "work", Root: "/groves/work", Depth: 2}},
+	}
+	res, err := Resolve(cfg, Opts{Cwd: "/somewhere/else"})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if res.Root != "/groves/work" || res.Name != "work" || res.Depth != 2 {
+		t.Errorf("Resolve() = %+v, want the configured default workspace", res)
+	}
+	if !strings.Contains(res.Source, "default workspace") {
+		t.Errorf("Source = %q, want it to name rule 5", res.Source)
+	}
+}
+
+// TestResolveNoDefaultStillFallsThroughToCwd keeps rule 6 reachable: an empty
+// `default` is not a typo, it is the ordinary zero-config case, and it must
+// still resolve to the working directory rather than to an error.
+func TestResolveNoDefaultStillFallsThroughToCwd(t *testing.T) {
+	cfg := &Config{Workspaces: []Workspace{{Name: "work", Root: "/groves/work"}}}
+	res, err := Resolve(cfg, Opts{Cwd: "/somewhere/else"})
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if res.Root != "/somewhere/else" || res.Source != "working directory" {
+		t.Errorf("Resolve() = %+v, want rule 6 and the working directory", res)
+	}
+}
