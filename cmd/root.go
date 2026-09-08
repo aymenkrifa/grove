@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -75,6 +76,8 @@ func newRootCmd() *cobra.Command {
 		newCompletionCmd(),
 		newVersionCmd(),
 	)
+
+	usageOnArgError(root)
 	return root
 }
 
@@ -128,7 +131,51 @@ func ExecuteWith(stdout, stderr io.Writer, args []string) int {
 		return exitCode
 	}
 	fmt.Fprintf(stderr, "grove: %v\n", err)
+	// A wrong number of arguments is a question of "how do I call this?", and
+	// the answer is one Fprintln away. Cobra suppresses usage for every error
+	// once SilenceUsage is set — which is right for a repository that failed
+	// mid-run, where a flag list explains nothing — but wrong here, where the
+	// complaint alone ("accepts 1 arg(s), received 0") leaves the user to
+	// guess what the missing argument even is.
+	var ae *argError
+	if errors.As(err, &ae) {
+		// The full help, not just the usage line: for `completion` and
+		// `shell-init` the Long text carries the install instructions, which
+		// is the thing someone who mis-called them actually needs. It goes to
+		// stderr with the error, so stdout stays empty for a failed run.
+		fmt.Fprintln(stderr)
+		ae.cmd.SetOut(stderr)
+		_ = ae.cmd.Help()
+	}
 	return ExitError
+}
+
+// argError marks a positional-argument failure, so ExecuteWith can print the
+// offending command's usage without printing it for ordinary runtime errors.
+type argError struct {
+	err error
+	cmd *cobra.Command
+}
+
+func (e *argError) Error() string { return e.err.Error() }
+func (e *argError) Unwrap() error { return e.err }
+
+// usageOnArgError wraps a positional-args validator so a bad invocation is
+// tagged as one. Applied to every command by walking the tree rather than at
+// each declaration: a command added later would otherwise silently opt out of
+// it, and this is the kind of consistency a user notices only when it breaks.
+func usageOnArgError(cmd *cobra.Command) {
+	if fn := cmd.Args; fn != nil {
+		cmd.Args = func(c *cobra.Command, args []string) error {
+			if err := fn(c, args); err != nil {
+				return &argError{err: err, cmd: c}
+			}
+			return nil
+		}
+	}
+	for _, sub := range cmd.Commands() {
+		usageOnArgError(sub)
+	}
 }
 
 // ExecuteAsGitSubcommand runs grove against the real standard streams and

@@ -26,7 +26,7 @@ func newExecCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			n := cmd.ArgsLenAtDash()
 			if n < 0 || n >= len(args) {
-				return errors.New("no command given; usage: grove exec [selector] -- <command> [args...]")
+				return &argError{err: errors.New("no command given"), cmd: cmd}
 			}
 			if n > 1 {
 				return fmt.Errorf("at most one selector is allowed before --, got %d: %v", n, args[:n])

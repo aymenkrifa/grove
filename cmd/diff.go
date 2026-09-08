@@ -107,7 +107,15 @@ func splitPassthrough(cmd *cobra.Command, args []string) (string, []string, erro
 		pre, post = args[:n], args[n:]
 	}
 	if len(pre) > 1 {
-		return "", nil, fmt.Errorf("at most one selector is allowed, got %d: %v", len(pre), pre)
+		// Tagged so the caller sees this command's help, exactly as a wrong
+		// argument count caught by cobra's own Args validator would. These
+		// two commands validate in RunE because everything after -- belongs
+		// to git, not to them — but a user who miscounts selectors has made
+		// the same mistake either way.
+		return "", nil, &argError{
+			err: fmt.Errorf("at most one selector is allowed, got %d: %v", len(pre), pre),
+			cmd: cmd,
+		}
 	}
 	return firstArg(pre), post, nil
 }

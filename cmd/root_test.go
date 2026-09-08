@@ -1138,3 +1138,71 @@ func TestBranchFilterComposesWithTheSelector(t *testing.T) {
 		t.Errorf("selector 'api' must still exclude web/dash:\n%s", out)
 	}
 }
+
+// A wrong number of arguments is a question of "how do I call this?", so the
+// answer belongs in the output. Cobra's SilenceUsage suppresses it for every
+// error, which is right for a repository that failed mid-run and wrong here:
+// "accepts 1 arg(s), received 0" alone leaves the user to guess what the
+// missing argument even is.
+func TestArgumentErrorsPrintTheCommandsHelp(t *testing.T) {
+	tests := []struct {
+		name     string
+		argv     []string
+		wantHelp string // a phrase unique to that command's help
+	}{
+		{"missing required arg", []string{"completion"}, "grove completion zsh"},
+		{"missing required arg, shell-init", []string{"shell-init"}, "shell startup file"},
+		{"too many args", []string{"status", "a", "b"}, "Show branch and working-tree state"},
+		{"custom validator in diff", []string{"diff", "a", "b"}, "per-repository diffstat"},
+		{"exec with no command", []string{"exec"}, "route to a command that changes anything"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := ticketWorkspace(t)
+			argv := append(tt.argv, "--root", root)
+			stdout, stderr, code := runSplit(t, argv...)
+
+			if code != ExitError {
+				t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitError, stderr)
+			}
+			if !strings.Contains(stderr, tt.wantHelp) {
+				t.Errorf("stderr does not carry the command's help (looked for %q):\n%s", tt.wantHelp, stderr)
+			}
+			if !strings.Contains(stderr, "Usage:") {
+				t.Errorf("help must include the usage line:\n%s", stderr)
+			}
+			if stdout != "" {
+				t.Errorf("a failed run must leave stdout empty, got %q", stdout)
+			}
+		})
+	}
+}
+
+// The other half: a run that got its arguments right and then failed must not
+// be answered with a flag list. Nothing in the usage explains a missing
+// repository or an unreachable remote, and printing it buries the message
+// that does.
+func TestRuntimeErrorsDoNotPrintHelp(t *testing.T) {
+	tests := []struct {
+		name string
+		argv []string
+	}{
+		{"unknown selector", []string{"status", "nosuchrepo"}},
+		{"no repo on that branch", []string{"status", "--branch", "ZZZ-000"}},
+		{"invalid colour mode", []string{"status", "--color", "purple"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := ticketWorkspace(t)
+			argv := append(tt.argv, "--root", root)
+			_, stderr, code := runSplit(t, argv...)
+
+			if code != ExitError {
+				t.Fatalf("exit = %d, want %d\nstderr: %s", code, ExitError, stderr)
+			}
+			if strings.Contains(stderr, "Usage:") || strings.Contains(stderr, "Global Flags:") {
+				t.Errorf("a runtime failure should not dump usage:\n%s", stderr)
+			}
+		})
+	}
+}
