@@ -1061,3 +1061,80 @@ func TestColorIsValidatedInTheConfigFileAndTheMarker(t *testing.T) {
 		}
 	})
 }
+
+// --branch is the ticket-key filter: it narrows by what a repository is
+// working on, not where it sits. It lives in resolveAndFind so every command
+// answers the same question the same way.
+func ticketWorkspace(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	testutil.NewRepo(t, filepath.Join(root, "api", "gateway"),
+		testutil.WithCommit(), testutil.WithBranch("bugfix/ABC-123-token"), testutil.Dirty())
+	testutil.NewRepo(t, filepath.Join(root, "api", "billing"),
+		testutil.WithCommit(), testutil.WithBranch("develop"), testutil.Dirty())
+	testutil.NewRepo(t, filepath.Join(root, "web", "dash"),
+		testutil.WithCommit(), testutil.WithBranch("feat/ABC-123-ui"), testutil.Dirty())
+	isolate(t)
+	return root
+}
+
+func TestBranchFilterNarrowsEveryCommand(t *testing.T) {
+	root := ticketWorkspace(t)
+
+	for _, command := range []string{"status", "list", "diff"} {
+		t.Run(command, func(t *testing.T) {
+			out, code := run(t, command, "--root", root, "--branch", "ABC-123")
+			if code != ExitOK {
+				t.Fatalf("exit = %d\n%s", code, out)
+			}
+			if !strings.Contains(out, "gateway") || !strings.Contains(out, "dash") {
+				t.Errorf("%s dropped a repo on the ticket's branch:\n%s", command, out)
+			}
+			if strings.Contains(out, "billing") {
+				t.Errorf("%s kept a repo on develop:\n%s", command, out)
+			}
+		})
+	}
+}
+
+// The count goes to stderr so a filtered diff piped to a file stays a clean
+// patch, matching where every other diagnostic goes.
+func TestBranchFilterReportsTheCountOnStderr(t *testing.T) {
+	root := ticketWorkspace(t)
+	stdout, stderr, code := runSplit(t, "list", "--root", root, "--branch", "ABC-123")
+	if code != ExitOK {
+		t.Fatalf("exit = %d\n%s\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "2 of 3") {
+		t.Errorf("stderr should report how many matched, got %q", stderr)
+	}
+	if strings.Contains(stdout, "of 3") {
+		t.Errorf("the count must not pollute stdout: %q", stdout)
+	}
+}
+
+// A pattern matching nothing is far more often a mistyped ticket key than a
+// true "nothing in flight", and the path selector already errors on no-match.
+func TestBranchFilterNoMatchExitsError(t *testing.T) {
+	root := ticketWorkspace(t)
+	out, code := run(t, "status", "--root", root, "--branch", "ZZZ-999")
+	if code != ExitError {
+		t.Errorf("exit = %d, want %d\n%s", code, ExitError, out)
+	}
+}
+
+// The two filters compose: --branch narrows by what is being worked on, the
+// selector by where it lives.
+func TestBranchFilterComposesWithTheSelector(t *testing.T) {
+	root := ticketWorkspace(t)
+	out, code := run(t, "list", "--root", root, "--branch", "ABC-123", "api")
+	if code != ExitOK {
+		t.Fatalf("exit = %d\n%s", code, out)
+	}
+	if !strings.Contains(out, "api/gateway") {
+		t.Errorf("want api/gateway (in api, on the branch):\n%s", out)
+	}
+	if strings.Contains(out, "web/dash") {
+		t.Errorf("selector 'api' must still exclude web/dash:\n%s", out)
+	}
+}

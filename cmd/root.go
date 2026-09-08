@@ -33,6 +33,7 @@ var (
 	flagColor     string
 	flagJobs      int
 	flagASCII     bool
+	flagBranch    string
 )
 
 func newRootCmd() *cobra.Command {
@@ -47,6 +48,7 @@ func newRootCmd() *cobra.Command {
 	pf.StringVarP(&flagWorkspace, "workspace", "w", "", "named workspace from the config file")
 	pf.StringVar(&flagColor, "color", "", "auto|always|never")
 	pf.IntVar(&flagJobs, "jobs", 0, "maximum concurrent git processes")
+	pf.StringVar(&flagBranch, "branch", "", "only repositories whose current branch contains this text (e.g. a ticket key)")
 	pf.BoolVar(&flagASCII, "ascii", false, "use ASCII symbols instead of unicode")
 
 	// On the root rather than on each command, for the same reason --color is
@@ -247,6 +249,24 @@ func resolveAndFind(selector string) (*config.Resolved, []discover.Found, error)
 	sel, err := discover.Select(found, selector)
 	if err != nil {
 		return nil, nil, err
+	}
+
+	// --branch narrows by what the repository is currently working on rather
+	// than where it sits. Nothing in git ties an uncommitted change to a
+	// ticket, so a branch named after one is the only signal there is; every
+	// command shares this path so every command answers the same question the
+	// same way.
+	//
+	// A pattern matching nothing is an error, not an empty result: it is far
+	// more often a mistyped ticket key than a true "nothing in flight", and
+	// the selector above already treats no-match that way.
+	if flagBranch != "" {
+		before := len(sel)
+		sel = git.FilterByBranch(context.Background(), sel, flagBranch, flagJobs)
+		if len(sel) == 0 {
+			return nil, nil, fmt.Errorf("no repository is on a branch containing %q (checked %d)", flagBranch, before)
+		}
+		fmt.Fprintf(errOut, "%d of %d repositories on a branch containing %q\n", len(sel), before, flagBranch)
 	}
 	return res, sel, nil
 }
