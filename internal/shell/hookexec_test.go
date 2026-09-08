@@ -72,8 +72,13 @@ func groveBinary(t *testing.T) string {
 // hookFixture is a grove with three groups and a directory outside it,
 // everything under a path containing a space.
 type hookFixture struct {
-	tree    string   // the grove root
-	outside string   // a directory in no grove at all
+	tree    string // the grove root
+	outside string // a directory in no grove at all
+	// sibling is a directory beside the grove root whose absolute path
+	// string-prefixes it — ".../work tree shop" next to ".../work tree". It
+	// is in no grove either, but only a containment test that respects path
+	// separators can tell: strings.HasPrefix(cwd, root) calls it a child.
+	sibling string
 	env     []string // base environment: PATH, HOME and config, all isolated
 }
 
@@ -92,11 +97,12 @@ func newHookFixture(t *testing.T) *hookFixture {
 	f := &hookFixture{
 		tree:    filepath.Join(base, "my groves", "work tree"),
 		outside: filepath.Join(base, "not a grove", "some dir"),
+		sibling: filepath.Join(base, "my groves", "work tree shop"),
 	}
 	binDir := filepath.Join(base, "bin dir")
 	home := filepath.Join(base, "home dir")
 	cfgHome := filepath.Join(base, "config home")
-	for _, dir := range []string{binDir, home, f.outside, filepath.Join(cfgHome, "grove")} {
+	for _, dir := range []string{binDir, home, f.outside, f.sibling, filepath.Join(cfgHome, "grove")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -329,6 +335,19 @@ var forwardCases = []forwardCase{
 		// tree from anywhere on the machine.
 		name:    "outside any grove git answers",
 		dir:     func(f *hookFixture) string { return f.outside },
+		cmdline: "git status",
+		git:     argv("status"),
+	},
+	{
+		// The mirror of the "we"/"web" case one level down, at the level that
+		// matters most: a sibling of the grove ROOT whose path merely starts
+		// with it. ".../work tree shop" is not in the grove, and the fixture's
+		// default workspace resolves to ".../work tree" from anywhere, so a
+		// containment test written as strings.HasPrefix(cwd, root) answers
+		// happily here and the wrapper reports a tree the user is not in. That
+		// mutant passed the entire suite until this row existed.
+		name:    "a sibling whose path prefixes the grove root is outside it",
+		dir:     func(f *hookFixture) string { return f.sibling },
 		cmdline: "git status",
 		git:     argv("status"),
 	},

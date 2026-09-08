@@ -329,11 +329,21 @@ func TestResolveScopeDoesNotClaimAPrefixSibling(t *testing.T) {
 	}
 }
 
-// TestRelWithin exercises the containment test directly, including the two
+// TestRelWithin exercises the containment test directly, including the three
 // cases the command-level tests cannot reach: cwd exactly one segment above
-// the root (rel == ".."), and a directory inside the grove whose name merely
-// begins with two dots. Testing only for a ".." prefix would call "..cache" an
+// the root (rel == ".."), a directory inside the grove whose name merely
+// begins with two dots, and a sibling of the root whose absolute path
+// string-prefixes it. Testing only for a ".." prefix would call "..cache" an
 // escape and refuse to forward from a perfectly ordinary subdirectory.
+//
+// The string-prefix siblings are what keep this test honest. Every other row
+// below is answered correctly by a containment test written as
+// strings.HasPrefix(cwd, root) — a mutant of exactly that shape passed this
+// file, the hook matrix and the whole suite while re-opening the worst defect
+// this project has: "/groves/workshop" is not inside "/groves/work", but its
+// path does start with it, so the git wrapper would fire in a directory
+// belonging to another tree entirely and answer about one the user is not in.
+// A prefix only makes a child when a separator follows it.
 func TestRelWithin(t *testing.T) {
 	root := filepath.Join("/groves", "work")
 	for _, tc := range []struct {
@@ -350,6 +360,10 @@ func TestRelWithin(t *testing.T) {
 		{filepath.Join(root, "..", "other"), "", false},           // /groves/other
 		{filepath.Join(root, "..", "..", "elsewhere"), "", false}, // /elsewhere
 		{"/", "", false},
+		// Siblings, not children: /groves/workshop beside /groves/work.
+		{filepath.Join("/groves", "workshop"), "", false},
+		{filepath.Join("/groves", "workshop", "repo"), "", false},
+		{root + "x", "", false},
 	} {
 		rel, ok := relWithin(root, tc.path)
 		if ok != tc.ok || rel != tc.rel {
