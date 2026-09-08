@@ -2,9 +2,12 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -76,6 +79,26 @@ func newRootCmd() *cobra.Command {
 // Execute runs grove against the real standard streams.
 func Execute() int { return ExecuteWith(os.Stdout, os.Stderr, os.Args[1:]) }
 
+// signalContext returns the context every command runs under: one that is
+// cancelled when grove is interrupted or terminated.
+//
+// Every command reaches it through cmd.Context(), which is context.Background()
+// unless a context is supplied here, and Background is never cancelled. That is
+// invisible while grove is the foreground process of an interactive shell,
+// because Ctrl-C goes to the whole foreground process group and the git
+// children get it directly. It stops being invisible the moment grove is not
+// the group leader — run from a script, or as the `git grove` shim — where the
+// signal arrives at grove alone: grove dies on the spot and its git children
+// keep running, orphaned, fetching in repositories nobody is waiting on any
+// more. With a cancellable context, exec.CommandContext takes every one of
+// them down on the way out.
+//
+// SIGTERM as well as interrupt, because a script's `kill` sends the former and
+// has exactly the same problem.
+func signalContext() (context.Context, context.CancelFunc) {
+	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+}
+
 // ExecuteWith runs grove against the given streams, which is what the tests use.
 func ExecuteWith(stdout, stderr io.Writer, args []string) int {
 	// exitCode and errOut are package-level, so they carry over from whatever
@@ -92,10 +115,13 @@ func ExecuteWith(stdout, stderr io.Writer, args []string) int {
 	root.SetErr(stderr)
 	root.SetArgs(args)
 
+	ctx, stop := signalContext()
+	defer stop()
+
 	// The flag variables are reset for free: pflag writes the default value
 	// through the pointer at registration, and newRootCmd registers afresh
 	// on every call.
-	err := root.Execute()
+	err := root.ExecuteContext(ctx)
 	if err == nil {
 		return exitCode
 	}
@@ -142,7 +168,13 @@ func executeAsGitSubcommandWith(stdout, stderr io.Writer, args []string) int {
 	root.SetErr(stderr)
 	root.SetArgs(args)
 
-	err := root.Execute()
+	// The shim needs this more than ExecuteWith does, not less: `git grove
+	// fetch` runs grove as git's own child, so grove is never the process
+	// group leader there.
+	ctx, stop := signalContext()
+	defer stop()
+
+	err := root.ExecuteContext(ctx)
 	if err == nil {
 		return exitCode
 	}
