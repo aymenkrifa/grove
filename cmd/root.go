@@ -285,6 +285,7 @@ func renderOptions(res *config.Resolved, out io.Writer) render.Options {
 		Color:     render.UseColor(mode, isTerminal(out)),
 		ASCII:     flagASCII || res.Display.ASCII,
 		ShowClean: res.Display.ShowClean,
+		Explain:   res.Display.Explain,
 	}
 }
 

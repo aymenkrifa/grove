@@ -37,6 +37,7 @@ type Display struct {
 	ShowStash    bool   `toml:"show_stash"`
 	Color        string `toml:"color"`
 	ASCII        bool   `toml:"ascii"`
+	Explain      bool   `toml:"explain"`
 }
 
 // MarkerName is the per-directory workspace marker file.

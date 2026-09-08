@@ -744,3 +744,55 @@ func TestTableReturnsWriteErrors(t *testing.T) {
 		t.Errorf("Table() error = %v, want the writer's error", err)
 	}
 }
+
+// The explain column is off unless asked for, and when asked for it must
+// occupy a real column: the mutation that appends it to the *state* cell
+// instead of as its own passes any test that only greps for the words.
+func TestTableExplainColumn(t *testing.T) {
+	repos := []git.Repo{
+		{Path: "api/gateway", Group: "api", Branch: "main", Unstaged: 4, Untracked: 3, Upstream: "origin/main"},
+		{Path: "api/billing", Group: "api", Branch: "develop", Clean: true, Upstream: "origin/develop"},
+		{Path: "web/search", Group: "web", Branch: "main", Upstream: "origin/main", Behind: 3},
+	}
+
+	off := opts()
+	var plain bytes.Buffer
+	if err := Table(&plain, repos, off); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plain.String(), "modified") {
+		t.Errorf("explain is off by default, but the table describes state in words:\n%s", plain.String())
+	}
+
+	on := opts()
+	on.Explain = true
+	var buf bytes.Buffer
+	if err := Table(&buf, repos, on); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+
+	gateway := lineStartingWith(t, out, "gateway")
+	if !strings.HasSuffix(gateway, "4 modified, 3 untracked") {
+		t.Errorf("description must be the last column of its row, got %q", gateway)
+	}
+	// The divergence cell still precedes it, so the description did not
+	// swallow or replace a column.
+	if !strings.Contains(gateway, "↑0 ↓0") {
+		t.Errorf("divergence column lost when explain is on: %q", gateway)
+	}
+
+	if got := lineStartingWith(t, out, "search"); !strings.HasSuffix(got, "3 to pull") {
+		t.Errorf("behind-only repo = %q, want it to end with %q", got, "3 to pull")
+	}
+
+	// A clean repo keeps an empty cell, and trailing padding must not survive
+	// into the line — the same right-trim rule every other row obeys.
+	billing := lineStartingWith(t, out, "billing")
+	if billing != strings.TrimRight(billing, " ") {
+		t.Errorf("clean row carries trailing padding from the empty description: %q", billing)
+	}
+	if strings.Contains(billing, "modified") || strings.Contains(billing, "pull") {
+		t.Errorf("clean repo should have an empty description, got %q", billing)
+	}
+}

@@ -17,6 +17,10 @@ type Options struct {
 	Color     bool
 	ASCII     bool
 	ShowClean bool
+	// Explain adds a trailing column putting the symbol columns into words.
+	// Off by default: the symbols are the compact form the table exists for,
+	// and the words are for when you want them.
+	Explain bool
 }
 
 // symbols are the glyphs that differ between a UTF-8 terminal and one that
@@ -57,7 +61,7 @@ func Table(w io.Writer, repos []git.Repo, o Options) error {
 			pad = indent
 		}
 		for _, r := range buckets[g] {
-			rows = append(rows, repoCells(r, o.Display, p, sym, pad))
+			rows = append(rows, repoCells(r, o, p, sym, pad))
 		}
 	}
 
@@ -107,14 +111,23 @@ func layout(b *strings.Builder, rows [][]cell) {
 	}
 }
 
-// repoCells builds one repo's row: name, branch, working-tree state, divergence.
-func repoCells(r git.Repo, d config.Display, p painter, sym symbols, pad string) []cell {
-	return []cell{
-		plainCell(pad + name(r, d)),
+// repoCells builds one repo's row: name, branch, working-tree state,
+// divergence, and — only when asked for — the same thing in words.
+//
+// The description is dim because it restates what the two columns to its left
+// already say. It is a gloss, not a finding, and should not compete with them
+// for the eye.
+func repoCells(r git.Repo, o Options, p painter, sym symbols, pad string) []cell {
+	cells := []cell{
+		plainCell(pad + name(r, o.Display)),
 		branch(r, p),
 		state(r, p, sym),
 		divergence(r, p, sym),
 	}
+	if o.Explain {
+		cells = append(cells, p.cellOf(dim, explain(r)))
+	}
+	return cells
 }
 
 // name is the repo's label within its group: the directory grouping already

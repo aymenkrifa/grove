@@ -9,6 +9,7 @@ import (
 
 func newStatusCmd() *cobra.Command {
 	var (
+		explain   bool
 		dirtyOnly bool
 		asJSON    bool
 		noStash   bool
@@ -36,6 +37,9 @@ func newStatusCmd() *cobra.Command {
 				return render.JSON(out, res.Root, res.Name, repos)
 			}
 			o := renderOptions(res, out)
+			if explain {
+				o.Explain = true
+			}
 			if dirtyOnly {
 				// Options.ShowClean, not Display.ShowClean: the flag is this
 				// run's choice, and writing it into the config's display
@@ -45,6 +49,7 @@ func newStatusCmd() *cobra.Command {
 			return render.Table(out, repos, o)
 		},
 	}
+	c.Flags().BoolVarP(&explain, "explain", "e", false, "add a column describing each repository's state in words")
 	c.Flags().BoolVarP(&dirtyOnly, "dirty", "d", false, "only repositories needing attention")
 	c.Flags().BoolVar(&asJSON, "json", false, "machine-readable output")
 	c.Flags().BoolVar(&noStash, "no-stash", false, "skip counting stash entries")
