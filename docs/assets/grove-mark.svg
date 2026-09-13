@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 174 158" width="174" height="158" role="img" aria-label="grove">
+  <rect x="5" y="142" width="164" height="10" rx="5" fill="#6B5842"/>
+  <rect x="24.1" y="118.0" width="12" height="29.0" rx="3.4" fill="#6B5842"/>
+  <rect x="84.9" y="118.0" width="15" height="29.0" rx="4.3" fill="#6B5842"/>
+  <rect x="144.2" y="118.0" width="10" height="29.0" rx="2.9" fill="#6B5842"/>
+  <path d="M 30.15,35.00 L 51.29,124.00 L 30.15,124.00 L 9.01,124.00 Z" fill="#3F7D35" stroke="#3F7D35" stroke-width="8.0" stroke-linejoin="round"/>
+  <path d="M 92.40,10.00 L 119.48,124.00 L 92.40,124.00 L 65.33,124.00 Z" fill="#3F7D35" stroke="#3F7D35" stroke-width="8.0" stroke-linejoin="round"/>
+  <path d="M 149.15,58.00 L 164.83,124.00 L 149.15,124.00 L 133.47,124.00 Z" fill="#3F7D35" stroke="#3F7D35" stroke-width="8.0" stroke-linejoin="round"/>
+  <circle cx="92.4" cy="99" r="8.5" fill="#B07908"/>
+</svg>
