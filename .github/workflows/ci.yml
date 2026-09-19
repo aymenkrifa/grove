@@ -28,6 +28,16 @@ jobs:
       - name: Install fish, so the fish hook is actually exercised
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y fish
+      # The README tells contributors to run gofmt; CI should be the thing
+      # that makes that true rather than a note nobody enforces.
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "these files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
       - run: go vet ./...
       - run: go test -race ./...
       - run: go build ./...

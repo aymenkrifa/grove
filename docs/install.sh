@@ -115,7 +115,7 @@ main() {
   trap 'rm -rf "$TMP"' EXIT
 
   line ""
-  line "  ${b}grove${rst}${dim} · status, diffs and logs across every clone${rst}"
+  line "  ${b}grove${rst}${dim} · status, diffs and logs across every git repository under one directory${rst}"
   line ""
   ok "target" "${OS}_${ARCH}"
 
@@ -175,8 +175,13 @@ main() {
     install -m 755 "$TMP/$STEM/$bin" "$BIN_DIR/$bin"
   done
 
+  # Reaching here with old_ver already at the tag means the "up to date" exit
+  # above was skipped because git-grove had gone missing. That is a repair,
+  # not an update — "updated v0.1.0 → v0.1.0" would read as a no-op.
   if [ -z "$old_ver" ]; then
     ok "installed" "$BIN_DIR/grove, $BIN_DIR/git-grove  ($TAG)"
+  elif [ "$old_ver" = "$TAG" ]; then
+    ok "repaired" "reinstalled $TAG (git-grove was missing)"
   else
     ok "updated" "$old_ver → $TAG"
   fi
