@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>grove — status, diffs and logs across every git repository under one directory</title>
 <meta name="description" content="git answers questions about one repository at a time. grove answers them for every clone under one directory.">
+<link rel="canonical" href="https://grove.aymenkrifa.com/">
 <!-- an svg icon alone is enough for desktop chrome but not for the google app,
      android webview, or ios, which need a raster or a manifest entry -->
 <link rel="icon" href="favicon.ico" sizes="32x32">
@@ -213,6 +214,7 @@
   .pane .hash{color:var(--sap)}
   .sumline{color:var(--ash)}
   .sumline .dirty{color:var(--amber)}
+  .rail-foot .dirty{color:var(--amber)}
 
   /* the demo's resting state is the finished answer: with no script, with
      reduced motion, or before the cycle starts, everything is simply there.
@@ -370,7 +372,7 @@
         <div class="rrow r-dirty" data-repo="landing"><span>landing</span><span class="dot" title="uncommitted work"></span></div>
       </div>
       <div class="rail-foot">
-        <span class="cmd cmd-status">5 repos · 3 dirty</span><span class="cmd cmd-branch">3 branches across 5 repos</span><span class="cmd cmd-diff">3 repos have changes</span><span class="cmd cmd-log">8 commits since yesterday</span>
+        <span class="cmd cmd-status">5 repos · <span class="dirty">3 dirty</span></span><span class="cmd cmd-branch">3 branches across 5 repos</span><span class="cmd cmd-diff">3 repos have changes</span><span class="cmd cmd-log">8 commits since yesterday</span>
       </div>
     </div>
 
@@ -693,27 +695,39 @@
   // the version in the markup is a fallback; refresh it from the releases
   // api so cutting a tag updates the site without a redeploy. cached for an
   // hour — well under the api's 60-per-hour limit, but short enough that a
-  // fresh release shows on its own without clearing the browser cache.
+  // fresh release shows on its own without clearing the browser cache. the
+  // link follows the tag: the api hands back the release's own page, so the
+  // masthead points at what it names rather than the releases index.
   (function(){
-    var el = document.getElementById('version');
-    if (!el) return;
-    var KEY = 'grove-latest-release';
-    var TTL = 3600000; // 1 hour
     try {
-      var hit = JSON.parse(localStorage.getItem(KEY) || 'null');
-      if (hit && Date.now() - hit.at < TTL && hit.tag) { el.textContent = hit.tag; return; }
-    } catch (e) { /* unparseable cache, or storage blocked — refetch */ }
+      var el = document.getElementById('version');
+      if (!el || !window.fetch) return;
+      var KEY = 'grove-latest-release';
+      var TTL = 3600000; // 1 hour
 
-    try {
-      fetch('https://api.github.com/repos/aymenkrifa/grove/releases/latest')
+      function show(tag, url){
+        if (!tag) return;
+        el.textContent = tag;
+        if (url) el.href = url;
+      }
+
+      try {
+        var hit = JSON.parse(localStorage.getItem(KEY) || 'null');
+        if (hit && Date.now() - hit.at < TTL && hit.tag) { show(hit.tag, hit.url); return; }
+      } catch (e) { /* unparseable cache, or storage blocked — refetch */ }
+
+      fetch('https://api.github.com/repos/aymenkrifa/grove/releases/latest',
+            {headers: {'Accept': 'application/vnd.github+json'}})
         .then(function(r){ return r.ok ? r.json() : Promise.reject(r.status); })
         .then(function(d){
           if (!d || !d.tag_name) return;
-          el.textContent = d.tag_name;
-          try { localStorage.setItem(KEY, JSON.stringify({tag: d.tag_name, at: Date.now()})); } catch (e) {}
+          show(d.tag_name, d.html_url);
+          try {
+            localStorage.setItem(KEY, JSON.stringify({tag: d.tag_name, url: d.html_url, at: Date.now()}));
+          } catch (e) {}
         })
         .catch(function(){ /* offline, rate-limited, or no release — keep the fallback */ });
-    } catch (e) { /* no fetch at all — keep the fallback */ }
+    } catch (e) { /* never let the masthead take the page down */ }
   })();
 
   (function(){
