@@ -1,4 +1,12 @@
+<div align="center">
+  <img src="docs/assets/grove-banner.svg" alt="grove — status, diffs and logs across every git repository under one directory" width="820">
+  <p><a href="https://grove.aymenkrifa.com"><b>grove.aymenkrifa.com</b></a></p>
+</div>
+
 # grove
+
+![Workflow](https://github.com/aymenkrifa/grove/actions/workflows/ci.yml/badge.svg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Status, diffs and logs across every git repository under one directory.
 
@@ -21,6 +29,16 @@ web
 ```
 
 ## Install
+
+**Quick install** (no Go needed — fetches the right binaries for your machine,
+verifies them against the published checksum, and drops both `grove` and
+`git-grove` in `~/.local/bin`):
+
+```sh
+curl -LsSf https://grove.aymenkrifa.com/install.sh | sh
+```
+
+**With Go:**
 
 ```bash
 go install github.com/aymenkrifa/grove/...@latest
