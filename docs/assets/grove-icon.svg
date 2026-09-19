@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="grove">
+  <rect width="256" height="256" rx="44" fill="#F6F3EA"/>
+  <g transform="translate(14.900,25.300) scale(1.3)">
+    <rect x="17.00" y="11.00" width="46.00" height="10.00" rx="5.00" fill="#6B5842"/>
+    <rect x="17.00" y="11.00" width="10.00" height="127.00" rx="5.00" fill="#6B5842"/>
+    <rect x="17.00" y="52.00" width="40.00" height="10.00" rx="5.00" fill="#6B5842"/>
+    <rect x="17.00" y="90.00" width="40.00" height="10.00" rx="5.00" fill="#6B5842"/>
+    <rect x="17.00" y="128.00" width="40.00" height="10.00" rx="5.00" fill="#6B5842"/>
+    <rect x="53.00" y="43.00" width="64.00" height="28.00" rx="14.00" fill="#3F7D35"/>
+    <circle cx="143.0" cy="57.00" r="9.5" fill="none" stroke="#3F7D35" stroke-width="9.0"/>
+    <rect x="53.00" y="81.00" width="44.00" height="28.00" rx="14.00" fill="#3F7D35"/>
+    <circle cx="143.0" cy="95.00" r="14.0" fill="#B07908"/>
+    <rect x="53.00" y="119.00" width="54.00" height="28.00" rx="14.00" fill="#3F7D35"/>
+    <circle cx="143.0" cy="133.00" r="9.5" fill="none" stroke="#3F7D35" stroke-width="9.0"/>
+  </g>
+</svg>

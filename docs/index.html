@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>grove — status, diffs and logs across every git repository under one directory</title>
+<meta name="description" content="git answers questions about one repository at a time. grove answers them for every clone under one directory.">
+<!-- an svg icon alone is enough for desktop chrome but not for the google app,
+     android webview, or ios, which need a raster or a manifest entry -->
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="icon" type="image/svg+xml" href="assets/grove-icon.svg">
+<link rel="apple-touch-icon" href="assets/grove-icon-180.png">
+<link rel="manifest" href="site.webmanifest">
+<meta name="theme-color" content="#F6F3EA">
+<meta property="og:title" content="grove">
+<meta property="og:description" content="status, diffs and logs across every git repository under one directory">
+<meta property="og:image" content="https://grove.aymenkrifa.com/assets/grove-social-preview.png">
+<meta property="og:url" content="https://grove.aymenkrifa.com/">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet">
+<style>
+  /* grove inverts the family: birch paper is the default ground and dark is
+     the exception, so bare :root carries the LIGHT palette in full and the
+     two dark blocks below only override it. every colour is defined here. */
+  :root{
+    --ground:#F6F3EA; --panel:#FFFFFF; --ink:#1B2119;
+    --sap:#3F7D35; --bark:#6B5842; --amber:#B07908; --clay:#B4463C; --ash:#6E7669;
+    /* derived from the palette above, never independent colours */
+    --line:rgba(107,88,66,.20);
+    --line-firm:rgba(107,88,66,.34);
+    --surface:rgba(246,243,234,.72);
+    --tint:rgba(63,125,53,.10);
+    --wash:rgba(63,125,53,.055);
+    --shadow:0 1px 2px rgba(27,33,25,.05), 0 14px 34px -16px rgba(27,33,25,.18);
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:'IBM Plex Sans',system-ui,-apple-system,sans-serif;
+  }
+  /* night in the grove — same wood, no sun on it */
+  :root[data-theme=dark]{
+    --ground:#101510; --panel:#161C16; --ink:#E4E8DF;
+    --sap:#7FBF6C; --bark:#A08C6F; --amber:#E2A93F; --clay:#E07A6E; --ash:#8D9688;
+    --line:rgba(160,140,111,.22);
+    --line-firm:rgba(160,140,111,.38);
+    --surface:rgba(16,21,16,.55);
+    --tint:rgba(127,191,108,.11);
+    --wash:rgba(127,191,108,.05);
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 16px 38px -18px rgba(0,0,0,.7);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme=light]){
+      --ground:#101510; --panel:#161C16; --ink:#E4E8DF;
+      --sap:#7FBF6C; --bark:#A08C6F; --amber:#E2A93F; --clay:#E07A6E; --ash:#8D9688;
+      --line:rgba(160,140,111,.22);
+      --line-firm:rgba(160,140,111,.38);
+      --surface:rgba(16,21,16,.55);
+      --tint:rgba(127,191,108,.11);
+      --wash:rgba(127,191,108,.05);
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 16px 38px -18px rgba(0,0,0,.7);
+    }
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%}
+  body{background:var(--ground);color:var(--ink);font-family:var(--sans);
+       background-image:radial-gradient(ellipse 1100px 460px at 12% -160px, var(--wash) 0%, transparent 70%);
+       background-repeat:no-repeat;
+       font-size:16px;line-height:1.65;min-height:100vh;
+       padding-block:clamp(22px,3.4vh,40px) clamp(34px,6vh,64px);
+       padding-inline:clamp(18px,4vw,40px);
+       -webkit-font-smoothing:antialiased}
+  .page{max-width:1060px;margin:0 auto}
+  a{color:inherit}
+  code{font-family:var(--mono);font-size:.9em}
+
+  /* ---- masthead ---- */
+  .masthead{display:flex;justify-content:space-between;align-items:center;gap:16px;
+       font-family:var(--mono);font-size:12.5px;letter-spacing:.04em;color:var(--ash)}
+  .masthead b{color:var(--ink);font-weight:700;letter-spacing:.02em}
+  .masthead a{color:var(--ash);text-decoration:none}
+  .masthead a:hover{color:var(--sap)}
+  .mh-right{display:inline-flex;align-items:center;gap:16px}
+  .sky-toggle{font-family:var(--mono);font-size:12.5px;letter-spacing:.04em;
+       color:var(--ash);background:none;border:none;cursor:pointer;padding:0;
+       display:inline-flex;align-items:center;gap:7px;line-height:1}
+  .sky-toggle svg{flex:none;display:block}
+  .sky-toggle:hover{color:var(--sap)}
+
+  /* ---- hero ----
+     left-aligned, sitting on a hairline: the mark's own baseline rule, the
+     one the three conifers stand on, run the width of the page. */
+  .hero{display:flex;align-items:flex-end;flex-wrap:wrap;gap:10px 30px;
+       padding-top:clamp(26px,5vh,52px);padding-bottom:clamp(14px,2.2vh,20px);
+       border-bottom:1px solid var(--line-firm)}
+  .hero img{height:clamp(46px,7.2vw,62px);width:auto;max-width:100%;display:block}
+  /* the lockup ships in two cuts; show the one that suits the sky */
+  .hero img.logo-dark{display:none}
+  :root[data-theme=dark] .hero img.logo-dark{display:block}
+  :root[data-theme=dark] .hero img.logo-light{display:none}
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme=light]) .hero img.logo-dark{display:block}
+    :root:not([data-theme=light]) .hero img.logo-light{display:none}
+  }
+  .tagline{color:var(--ash);font-size:15px;max-width:46ch;padding-bottom:5px}
+  .lede{font-size:16.5px;line-height:1.72;color:var(--ash);max-width:70ch;
+       margin-top:clamp(16px,2.6vh,24px)}
+  .lede b{color:var(--ink);font-weight:500}
+  .lede code{color:var(--ink);font-size:.88em}
+
+  /* ---- the workspace ----
+     one root on the left that never moves, and the answer to a different
+     question on the right. the switch is four radio inputs, so the panes and
+     the tree's per-question dimming work with javascript off; the script
+     only adds the typing and the unattended cycle. */
+  .workspace{position:relative;margin-top:clamp(24px,4vh,42px);
+       background:var(--panel);border:1px solid var(--line);border-radius:10px;
+       box-shadow:var(--shadow);overflow:hidden;
+       display:grid;grid-template-columns:248px minmax(0,1fr);
+       grid-template-areas:"rail head" "rail stage"}
+  /* off-screen but still focusable — a display:none radio takes no keyboard */
+  .q{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);
+       clip-path:inset(50%);white-space:nowrap}
+
+  .rail{grid-area:rail;border-right:1px solid var(--line);
+       background:linear-gradient(to bottom,var(--surface),transparent 60%);
+       padding:16px 16px 14px;font-family:var(--mono);font-size:13px;
+       display:flex;flex-direction:column;gap:2px}
+  .rail-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
+       padding-bottom:10px;margin-bottom:8px;border-bottom:1px solid var(--line)}
+  .rail-head .root{color:var(--bark);font-weight:700;letter-spacing:.01em}
+  .chip{font-size:10.5px;letter-spacing:.04em;color:var(--ash);
+       border:1px solid var(--line);border-radius:999px;padding:1px 7px;line-height:1.5}
+  .grp-row{color:var(--bark);font-weight:700;margin-top:7px;letter-spacing:.02em}
+  .grp-row:first-of-type{margin-top:0}
+  .rrow{display:flex;align-items:center;gap:8px;padding:1.5px 0 1.5px 14px;color:var(--ink)}
+  .rrow .dot{width:6px;height:6px;border-radius:50%;background:var(--amber);flex:none;
+       margin-left:auto;transition:opacity .25s ease}
+  .rail-foot{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);color:var(--ash);font-size:11.5px;
+       letter-spacing:.02em;line-height:1.5}
+  #q-status:checked ~ .rail .cmd-status,
+  #q-branch:checked ~ .rail .cmd-branch,
+  #q-diff:checked   ~ .rail .cmd-diff,
+  #q-log:checked    ~ .rail .cmd-log{display:inline}
+  /* grove diff omits repositories with nothing changed — so does the tree */
+  #q-diff:checked ~ .rail .r-clean{opacity:.34}
+
+  /* ---- the question bar ---- */
+  .head{grid-area:head;display:flex;align-items:center;justify-content:space-between;
+       gap:14px;flex-wrap:wrap;padding:11px 18px 0;border-bottom:1px solid var(--line)}
+  .tabs{display:flex;gap:2px;flex-wrap:wrap}
+  .tab{position:relative;font-family:var(--mono);font-size:13px;letter-spacing:.02em;
+       color:var(--ash);cursor:pointer;padding:6px 13px 9px;border-radius:5px 5px 0 0;
+       -webkit-tap-highlight-color:transparent;white-space:nowrap}
+  .tab:hover{color:var(--ink)}
+  .tab::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;
+       background:transparent}
+  /* the sliver that fills while a question is on screen unattended; it stops
+     for good the moment a reader picks a tab themselves */
+  .tab .prog{position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--sap);
+       transform:scaleX(0);transform-origin:0 50%;opacity:.55}
+  #q-status:checked ~ .head .tab[for=q-status],
+  #q-branch:checked ~ .head .tab[for=q-branch],
+  #q-diff:checked   ~ .head .tab[for=q-diff],
+  #q-log:checked    ~ .head .tab[for=q-log]{color:var(--ink);background:var(--tint);font-weight:500}
+  #q-status:checked ~ .head .tab[for=q-status]::after,
+  #q-branch:checked ~ .head .tab[for=q-branch]::after,
+  #q-diff:checked   ~ .head .tab[for=q-diff]::after,
+  #q-log:checked    ~ .head .tab[for=q-log]::after{background:var(--line-firm)}
+  #q-status:focus-visible ~ .head .tab[for=q-status],
+  #q-branch:focus-visible ~ .head .tab[for=q-branch],
+  #q-diff:focus-visible   ~ .head .tab[for=q-diff],
+  #q-log:focus-visible    ~ .head .tab[for=q-log]{outline:2px solid var(--sap);outline-offset:2px}
+  .head-note{font-family:var(--mono);font-size:11px;letter-spacing:.09em;
+       color:var(--ash);opacity:.75;padding-bottom:9px}
+
+  /* ---- the answer ---- */
+  .stage{grid-area:stage;padding:14px 18px 16px;min-width:0;
+       display:flex;flex-direction:column}
+  .cmdline{font-family:var(--mono);font-size:13.5px;line-height:1.75;
+       padding-bottom:11px;margin-bottom:12px;border-bottom:1px dashed var(--line);
+       overflow-x:auto;white-space:nowrap}
+  .pmt{color:var(--sap);user-select:none;margin-right:.6em}
+  .cmd{display:none;color:var(--ink)}
+  #q-status:checked ~ .stage .cmd-status,
+  #q-branch:checked ~ .stage .cmd-branch,
+  #q-diff:checked   ~ .stage .cmd-diff,
+  #q-log:checked    ~ .stage .cmd-log{display:inline}
+  .caret{display:inline-block;width:.55em;height:1.02em;background:var(--sap);
+       vertical-align:-.16em;margin-left:.08em;opacity:0}
+  .typing .caret{opacity:1;animation:blink 1.15s steps(1,end) infinite}
+  @keyframes blink{50%{opacity:0}}
+  /* the wrapper line keeps its row even when it has nothing to say, so the
+     table below never moves as the command above it is typed or swapped */
+  .wrapline{display:block;color:var(--ash);visibility:hidden}
+  #q-status:checked ~ .stage .wrapline{visibility:visible}
+  .wrapline .arw{color:var(--sap)}
+  .panes{flex:1;min-height:228px}
+  .pane{display:none;font-family:var(--mono);font-size:13.5px;line-height:1.72;
+       white-space:pre;overflow-x:auto;color:var(--ink);padding-bottom:2px}
+  #q-status:checked ~ .stage .pane-status,
+  #q-branch:checked ~ .stage .pane-branch,
+  #q-diff:checked   ~ .stage .pane-diff,
+  #q-log:checked    ~ .stage .pane-log{display:block}
+  .pane .grp{color:var(--bark);font-weight:700}
+  .pane .repo{color:var(--ink)}
+  .pane .br,.pane .mut{color:var(--ash)}
+  .pane .ok{color:var(--sap)}
+  .pane .dirty{color:var(--amber)}
+  .pane .rule{color:var(--ash);opacity:.55}
+  .pane .name{color:var(--bark);font-weight:700}
+  .pane .plus{color:var(--sap)}
+  .pane .minus{color:var(--clay)}
+  .pane .hash{color:var(--sap)}
+  .sumline{color:var(--ash)}
+  .sumline .dirty{color:var(--amber)}
+
+  /* the demo's resting state is the finished answer: with no script, with
+     reduced motion, or before the cycle starts, everything is simply there.
+     .anim is added by the script only when it is about to animate. the lines
+     inside a <pre> stay inline — they must keep their space while invisible,
+     so nothing below them moves as the tree fills in. */
+  .row,.grp,.late,.sumline,.grp-row,.rrow,.rail-foot,.wrapline{transition:opacity .25s ease,transform .25s ease}
+  .anim .row,.anim .grp,.anim .late,.anim .sumline,.anim .rail-foot{opacity:0}
+  .anim .grp-row,.anim .rrow{opacity:0;transform:translateY(2px)}
+  .anim .row.in,.anim .grp.in,.anim .late.in,.anim .sumline.in,.anim .rail-foot.in{opacity:1}
+  .anim .grp-row.in,.anim .rrow.in{opacity:1;transform:none}
+  .anim .wrapline{opacity:0}
+  .anim.wrapped .wrapline{opacity:1}
+  .panes{transition:opacity .18s ease}
+  .fading .panes,.fading .gloss{opacity:0}
+  /* what to notice in the answer above — the same switch as the panes, so it
+     changes with the question and sits on the card's bottom edge */
+  .gloss{display:none;font-size:13.5px;line-height:1.55;color:var(--ash);
+       margin-top:18px;max-width:64ch;transition:opacity .18s ease}
+  #q-status:checked ~ .stage .gl-status,
+  #q-branch:checked ~ .stage .gl-branch,
+  #q-diff:checked   ~ .stage .gl-diff,
+  #q-log:checked    ~ .stage .gl-log{display:block}
+  .gloss b{color:var(--ink);font-weight:500}
+  .gloss code{color:var(--ink);font-size:.88em}
+
+  /* ---- the wrapper strip ----
+     the second beat, given somewhere to live once the demo has moved on */
+  .wrap-strip{display:flex;gap:14px;align-items:flex-start;
+       margin-top:clamp(14px,2.4vh,22px);padding:14px 18px;
+       border:1px solid var(--line);border-left:3px solid var(--sap);border-radius:8px;
+       background:var(--surface);font-size:14.5px;line-height:1.6;color:var(--ash);max-width:78ch}
+  .wrap-strip .arw{font-family:var(--mono);color:var(--sap);font-weight:700;flex:none;line-height:1.55}
+  .wrap-strip code{color:var(--ink);font-size:.87em}
+  .wrap-strip b{color:var(--ink);font-weight:500}
+
+  /* ---- install + the promise ---- */
+  .band{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);
+       gap:clamp(22px,4vw,46px);margin-top:clamp(30px,5vh,54px)}
+  .lbl{font-family:var(--mono);font-size:11.5px;font-weight:500;letter-spacing:.14em;
+       text-transform:uppercase;color:var(--ash);margin-bottom:12px}
+  .cmd-wrap{display:flex;align-items:stretch;gap:12px;
+       border:1px solid var(--line);border-radius:8px;background:var(--panel);
+       box-shadow:var(--shadow);padding:11px 13px}
+  .cmd-line{font-family:var(--mono);font-size:13.5px;line-height:1.6;flex:1;min-width:0;
+       overflow-x:auto;white-space:pre}
+  .cmd-line .pmt{margin-right:.5em}
+  /* a real button, not selectable text: a bordered chip with a proper tap
+     target, no long-press callout or text selection, no tap-highlight flash */
+  .copy{font-family:var(--mono);font-size:12px;color:var(--ash);background:none;
+       border:1px solid var(--line);border-radius:5px;cursor:pointer;
+       padding:3px 10px;align-self:center;flex:none;white-space:nowrap;
+       -webkit-user-select:none;-moz-user-select:none;user-select:none;
+       -webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;
+       touch-action:manipulation}
+  .copy:hover{color:var(--sap);border-color:var(--sap)}
+  .copy:active{transform:translateY(1px)}
+  .copy[data-state=done]{color:var(--sap);border-color:var(--sap)}
+  .copy[data-state=fail]{color:var(--clay);border-color:var(--clay)}
+  .note{color:var(--ash);font-size:14px;line-height:1.62;margin-top:12px;max-width:54ch}
+  .note code{color:var(--ink)}
+  .promise{color:var(--ash);font-size:14.5px;line-height:1.65;max-width:52ch}
+  .promise b{color:var(--ink);font-weight:500}
+
+  footer{margin-top:clamp(30px,5vh,56px);padding-top:16px;border-top:1px solid var(--line);
+       color:var(--ash);font-size:13px}
+  footer a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--line)}
+  footer a:hover{color:var(--sap);border-bottom-color:var(--sap)}
+
+  /* narrow: the tree stops being a rail and becomes the header of the card,
+     with the question bar and its answer beneath — the same reading order,
+     one column. */
+  @media (max-width:840px){
+    .workspace{grid-template-columns:minmax(0,1fr);
+         grid-template-areas:"rail" "head" "stage"}
+    .rail{border-right:none;border-bottom:1px solid var(--line);
+         background:linear-gradient(to bottom,var(--surface),transparent)}
+    .rail-foot{margin-top:10px}
+    .band{grid-template-columns:minmax(0,1fr)}
+    .panes{min-height:0}
+  }
+  @media (max-width:560px){
+    body{font-size:15.5px}
+    .hero{gap:8px 20px;padding-top:26px}
+    .hero img{height:44px}
+    .tagline{font-size:14.5px;padding-bottom:0}
+    .lede{font-size:15.5px}
+    .head{padding:9px 12px 0}
+    .head-note{display:none}
+    .tab{font-size:12.5px;padding:6px 9px 8px}
+    .stage{padding:12px 12px 16px}
+    .rail{padding:14px 12px 12px}
+    .cmdline,.pane{font-size:12px;line-height:1.7}
+    .wrap-strip{padding:12px 14px;font-size:14px}
+    .cmd-line{font-size:12px}
+    .cmd-wrap{flex-direction:column;gap:9px}
+    .copy{align-self:flex-start;font-size:12.5px;padding:5px 12px}
+  }
+
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important}
+  }
+</style>
+<script>
+  // apply a pinned sky before first paint so there's no flash.
+  (function(){
+    try{
+      var t = localStorage.getItem('grove-theme');
+      if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+    }catch(e){ /* storage blocked — fall back to the system setting */ }
+  })();
+</script>
+</head>
+<body>
+<div class="page">
+
+  <header class="masthead">
+    <span><b>grove</b> · <a href="https://github.com/aymenkrifa/grove" target="_blank" rel="noopener noreferrer">github</a></span>
+    <span class="mh-right">
+      <a href="https://github.com/aymenkrifa/grove/releases" target="_blank" rel="noopener noreferrer" id="version">v0.1.0</a>
+      <button class="sky-toggle" id="sky-toggle" aria-label="toggle color scheme"></button>
+    </span>
+  </header>
+
+  <section class="hero">
+    <img class="logo-light" src="assets/grove-logo-light.svg" alt="grove" width="406" height="105">
+    <img class="logo-dark" src="assets/grove-logo-dark.svg" alt="grove" width="406" height="105">
+    <p class="tagline">Status, diffs and logs across every git repository under one directory.</p>
+  </section>
+
+  <p class="lede"><code>git</code> answers questions about one repository at a time. In a
+  directory holding twenty clones, the useful questions — <b>which have uncommitted work</b>,
+  <b>what branch is each on</b>, <b>what did I touch today</b> — have no answer at all.
+  grove answers them.</p>
+
+  <section class="workspace" id="workspace" aria-label="grove, one root answering four questions">
+    <input class="q" type="radio" name="q" id="q-status" checked>
+    <input class="q" type="radio" name="q" id="q-branch">
+    <input class="q" type="radio" name="q" id="q-diff">
+    <input class="q" type="radio" name="q" id="q-log">
+
+    <!-- the root. it does not change when the question does. -->
+    <div class="rail">
+      <div class="rail-head">
+        <span class="root">~/work</span>
+        <span class="chip">.grove.toml</span>
+      </div>
+      <div class="tree">
+        <div class="grp-row" data-group="api">api</div>
+        <div class="rrow r-clean" data-repo="auth-service"><span>auth-service</span></div>
+        <div class="rrow r-dirty" data-repo="billing"><span>billing</span><span class="dot" title="uncommitted work"></span></div>
+        <div class="rrow r-dirty" data-repo="gateway"><span>gateway</span><span class="dot" title="uncommitted work"></span></div>
+        <div class="grp-row" data-group="web">web</div>
+        <div class="rrow r-clean" data-repo="dashboard"><span>dashboard</span></div>
+        <div class="rrow r-dirty" data-repo="landing"><span>landing</span><span class="dot" title="uncommitted work"></span></div>
+      </div>
+      <div class="rail-foot">
+        <span class="cmd cmd-status">5 repos · 3 dirty</span><span class="cmd cmd-branch">3 branches across 5 repos</span><span class="cmd cmd-diff">3 repos have changes</span><span class="cmd cmd-log">8 commits since yesterday</span>
+      </div>
+    </div>
+
+    <div class="head">
+      <div class="tabs">
+        <label class="tab" for="q-status">status<i class="prog"></i></label>
+        <label class="tab" for="q-branch">branch<i class="prog"></i></label>
+        <label class="tab" for="q-diff">diff<i class="prog"></i></label>
+        <label class="tab" for="q-log">log<i class="prog"></i></label>
+      </div>
+      <span class="head-note">one root · four questions</span>
+    </div>
+
+    <div class="stage">
+      <div class="cmdline" id="cmdline"><span class="pmt">~/work $</span><span class="cmd cmd-status" id="typed">git status</span><span class="cmd cmd-branch">grove branch</span><span class="cmd cmd-diff">grove diff</span><span class="cmd cmd-log">grove log --since yesterday</span><span class="caret" aria-hidden="true"></span><span class="wrapline" id="wrapline"><span class="arw">→</span> grove status</span></div>
+
+      <div class="panes" id="panes">
+<pre class="pane pane-status"><span class="grp">api</span>
+<span class="row" data-repo="auth-service">  <span class="repo">auth-service</span>  <span class="br">feat/ABC-123-token-refresh</span>  <span class="late"><span class="ok">clean</span>  <span class="mut">↑0 ↓0</span></span></span>
+<span class="row" data-repo="billing">  <span class="repo">billing     </span>  <span class="br">develop                   </span>  <span class="late"><span class="dirty">~4</span>     <span class="mut">↑0 ↓0</span></span></span>
+<span class="row" data-repo="gateway">  <span class="repo">gateway     </span>  <span class="br">main                      </span>  <span class="late"><span class="dirty">~2 ?1</span>  <span class="ok">↑1</span> <span class="mut">↓0</span></span></span>
+<span class="grp">web</span>
+<span class="row" data-repo="dashboard">  <span class="repo">dashboard   </span>  <span class="br">develop                   </span>  <span class="late"><span class="ok">clean</span>  <span class="mut">↑0 ↓0</span></span></span>
+<span class="row" data-repo="landing">  <span class="repo">landing     </span>  <span class="br">develop                   </span>  <span class="late"><span class="dirty">~2</span>     <span class="mut">↑0 ↓0</span></span></span>
+
+<span class="sumline">5 repos · <span class="dirty">3 dirty</span> · 1 ahead · 0 behind</span></pre>
+
+<pre class="pane pane-branch"><span class="br">develop                   </span>  <span class="repo">api/billing</span>
+<span class="br">                          </span>  <span class="repo">web/dashboard</span>
+<span class="br">                          </span>  <span class="repo">web/landing</span>
+<span class="br">feat/ABC-123-token-refresh</span>  <span class="repo">api/auth-service</span>
+<span class="br">main                      </span>  <span class="repo">api/gateway</span></pre>
+
+<pre class="pane pane-diff"><span class="rule">──</span> <span class="name">api/billing</span> <span class="rule">────────────────────────────────────</span>
+ internal/invoice/render.go | 18 <span class="plus">+++++++++++++</span><span class="minus">-----</span>
+ internal/invoice/tax.go    | 12 <span class="plus">++++++</span><span class="minus">------</span>
+ internal/ledger/post.go    |  6 <span class="plus">+++</span><span class="minus">---</span>
+ migrations/0042_credit.sql | 14 <span class="plus">++++++++++++++</span>
+ 4 files changed, 36 insertions(+), 14 deletions(-)
+
+<span class="rule">──</span> <span class="name">api/gateway</span> <span class="rule">───────────────────────────────────</span>
+ cmd/gateway/main.go     |  9 <span class="plus">++++++</span><span class="minus">---</span>
+ internal/proxy/route.go | 17 <span class="plus">+++++++++++</span><span class="minus">------</span>
+ 2 files changed, 17 insertions(+), 9 deletions(-)
+
+<span class="rule">──</span> <span class="name">web/landing</span> <span class="rule">───────────────────────────────────</span>
+ src/pages/pricing.tsx | 21 <span class="plus">++++++++++++++</span><span class="minus">-------</span>
+ src/styles/tokens.css |  4 <span class="plus">++</span><span class="minus">--</span>
+ 2 files changed, 16 insertions(+), 9 deletions(-)</pre>
+
+<pre class="pane pane-log"><span class="hash">9f2ab08</span>  <span class="repo">api/billing     </span>  <span class="br">aymen</span>  credit notes use ledger currency
+<span class="hash">3d0c14e</span>  <span class="repo">web/landing     </span>  <span class="br">aymen</span>  pricing table reads tokens.css
+<span class="hash">77e1d54</span>  <span class="repo">api/gateway     </span>  <span class="br">aymen</span>  forward the request id upstream
+<span class="hash">b02c6aa</span>  <span class="repo">api/auth-service</span>  <span class="br">aymen</span>  rotate refresh tokens on reuse
+<span class="hash">4e8fa13</span>  <span class="repo">web/dashboard   </span>  <span class="br">aymen</span>  drop the unreadable chart legend
+<span class="hash">c57b290</span>  <span class="repo">api/billing     </span>  <span class="br">aymen</span>  credit note migration, forward
+<span class="hash">08d4e6f</span>  <span class="repo">api/gateway     </span>  <span class="br">aymen</span>  time out upstreams at 5s
+<span class="hash">e1a7c34</span>  <span class="repo">web/landing     </span>  <span class="br">aymen</span>  the hero stops reflowing at 380px</pre>
+      </div>
+
+      <p class="gloss gl-status">Three of the five have uncommitted work, and <code>gateway</code>
+      is a commit ahead of its remote. <b>One command, every repository.</b></p>
+      <p class="gloss gl-branch">The same five repositories, grouped by the branch they are on:
+      <b>one ticket branch, in one repository</b> — the rest sit on <code>develop</code> and
+      <code>main</code>.</p>
+      <p class="gloss gl-diff">A diffstat per repository. <b>The two with nothing to show drop
+      out</b> — of the answer, and of the tree beside it.</p>
+      <p class="gloss gl-log">Every repository's commits, <b>merged into one timeline</b> and
+      sorted by date. <code>--since</code>, <code>--author</code> and <code>-n</code> are git's
+      own.</p>
+    </div>
+  </section>
+
+  <p class="wrap-strip"><span class="arw">→</span><span>Inside a grove but outside any repository, plain <code>git status</code> becomes
+  <code>grove status</code> — and the same for <code>diff</code>, <code>fetch</code>,
+  <code>log</code> and <code>branch</code>. <b>It prints the grove command it ran</b>, so
+  nothing happens invisibly. Everywhere else, including inside a clone, <code>git</code> is
+  untouched.</span></p>
+
+  <section class="band">
+    <div>
+      <h2 class="lbl">Install</h2>
+      <div class="cmd-wrap">
+        <div class="cmd-line"><span class="pmt">~$</span><span id="install-cmd">curl -LsSf https://grove.aymenkrifa.com/install.sh | sh</span></div>
+        <button class="copy" id="copy-btn" aria-label="copy install command">[copy]</button>
+      </div>
+      <p class="note">Installs <code>grove</code> and <code>git-grove</code>, the shim the
+      wrapper above is built on. Linux and macOS.</p>
+    </div>
+    <div>
+      <h2 class="lbl">What it will not do</h2>
+      <p class="promise">grove <b>never changes a working tree</b>. There is no pull, push,
+      checkout or commit; <code>fetch</code> is the only network command and it touches no
+      files. Anything that mutates goes through <code>grove exec</code>, where you type the
+      command yourself and grove only fans it out.</p>
+    </div>
+  </section>
+
+  <footer>made by <a href="https://aymenkrifa.com" target="_blank" rel="noopener noreferrer">aymen krifa</a>, built with go and MIT-licensed.</footer>
+</div>
+
+<script>
+  (function(){
+    var btn = document.getElementById('sky-toggle');
+    var mq = matchMedia('(prefers-color-scheme: dark)');
+    function effective(){
+      // grove is light by default, so an unset system preference means light
+      return document.documentElement.dataset.theme || (mq.matches ? 'dark' : 'light');
+    }
+    // inline svg, not emoji: glyph coverage varies by device and falls back
+    // to tofu. stroke follows currentColor so it tracks the hover state.
+    var SUN  = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
+               'stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">' +
+               '<circle cx="12" cy="12" r="4.2"/><path d="M12 1.8v2.4M12 19.8v2.4' +
+               'M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M1.8 12h2.4M19.8 12h2.4' +
+               'M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7"/></svg>';
+    var MOON = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" ' +
+               'stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+               'stroke-linejoin="round" aria-hidden="true">' +
+               '<path d="M20.8 13.1A8.6 8.6 0 1 1 10.9 3.2a6.7 6.7 0 0 0 9.9 9.9z"/></svg>';
+    function label(){
+      var dark = effective() === 'dark';
+      btn.innerHTML = (dark ? SUN : MOON) + '<span>' + (dark ? 'light' : 'dark') + '</span>';
+      btn.setAttribute('aria-label', dark ? 'switch to light' : 'switch to dark');
+    }
+    btn.addEventListener('click', function(){
+      var next = effective() === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next;
+      try { localStorage.setItem('grove-theme', next); } catch (e) {}
+      label();
+    });
+    mq.addEventListener('change', label);
+    label();
+  })();
+
+  // the demo. beat one: the tree fills in, group by group, with each repo's
+  // dirty state arriving after its name so the answer is visibly the point.
+  // beat two: plain `git status`, typed, turning into `grove status`. then the
+  // same root is asked the other three questions, unattended, until a reader
+  // takes a tab for themselves.
+  (function(){
+    var ws = document.getElementById('workspace');
+    if (!ws) return;
+    var panes   = document.getElementById('panes');
+    var typed   = document.getElementById('typed');
+    var cmdline = document.getElementById('cmdline');
+    var ORDER   = ['status','branch','diff','log'];
+    var radios  = {};
+    ORDER.forEach(function(k){ radios[k] = document.getElementById('q-' + k); });
+    if (!panes || !typed || !cmdline || !radios.status) return;
+
+    var GIT = 'git status';
+    var statusPane = panes.querySelector('.pane-status');
+    var groups = [
+      {name:'api', repos:['auth-service','billing','gateway']},
+      {name:'web', repos:['dashboard','landing']}
+    ];
+
+    var timers = [], running = false, stopped = false, inView = true, idx = 0;
+    function at(ms, fn){ timers.push(setTimeout(fn, ms)); }
+    function clearAll(){ timers.forEach(clearTimeout); timers = []; }
+
+    function q(sel, root){ return (root || ws).querySelector(sel); }
+    function paneGrp(name){ return statusPane.querySelectorAll('.grp')[name === 'api' ? 0 : 1]; }
+    function railGrp(name){ return q('.grp-row[data-group="' + name + '"]'); }
+    function paneRow(r){ return q('.row[data-repo="' + r + '"]'); }
+    function railRow(r){ return q('.rrow[data-repo="' + r + '"]'); }
+    function show(el){ if (el) el.classList.add('in'); }
+
+    function resetProgs(){
+      ws.querySelectorAll('.prog').forEach(function(p){
+        p.style.transition = 'none';
+        p.style.transform = 'scaleX(0)';
+      });
+    }
+    function runProg(key, ms){
+      resetProgs();
+      var p = q('.tab[for=q-' + key + '] .prog');
+      if (!p) return;
+      void p.offsetWidth;                       // commit the reset before arming
+      p.style.transition = 'transform ' + ms + 'ms linear';
+      p.style.transform = 'scaleX(1)';
+    }
+
+    // final, settled state — what the page looks like with no script at all
+    function settle(key){
+      clearAll();
+      ws.classList.remove('anim', 'wrapped', 'fading');
+      cmdline.classList.remove('typing');
+      typed.textContent = GIT;
+      resetProgs();
+      if (key) radios[key].checked = true;
+    }
+
+    function select(key, cb){
+      ws.classList.add('fading');
+      at(180, function(){
+        radios[key].checked = true;
+        ws.classList.remove('fading');
+        if (cb) cb();
+      });
+    }
+
+    function type(text, cb){
+      var i = 0;
+      typed.textContent = '';
+      cmdline.classList.add('typing');
+      (function step(){
+        typed.textContent = text.slice(0, ++i);
+        if (i < text.length) at(55, step);
+        else at(260, function(){ cmdline.classList.remove('typing'); cb(); });
+      })();
+    }
+
+    // the tree, group by group: a heading, then its repos one per 120ms
+    function fillTree(next){
+      var t = 0;
+      groups.forEach(function(g){
+        at(t, function(){ show(paneGrp(g.name)); show(railGrp(g.name)); });
+        g.repos.forEach(function(r, i){
+          var rowAt = t + 120 * (i + 1);
+          at(rowAt, function(){ show(paneRow(r)); show(railRow(r)); });
+          // the dirty markers and the ahead/behind pair land 180ms later,
+          // so the state reads as the answer rather than as scenery
+          at(rowAt + 180, function(){
+            var row = paneRow(r);
+            if (row) row.querySelectorAll('.late').forEach(show);
+          });
+        });
+        t += 120 * (g.repos.length + 1);
+      });
+      var last = t - 120;
+      at(last + 700, function(){
+        statusPane.querySelectorAll('.sumline').forEach(show);
+        show(q('.rail-foot'));
+      });
+      at(last + 1650, function(){ runProg('status', 4200); });
+      at(last + 5850, next);
+    }
+
+    // beat one, then beat two: plain `git status` typed outside any repo but
+    // inside a grove, turning into `grove status` before the tree answers it
+    function statusBeat(next){
+      ws.classList.add('anim');
+      ws.classList.remove('wrapped');
+      ws.querySelectorAll('.in').forEach(function(el){ el.classList.remove('in'); });
+      radios.status.checked = true;
+      typed.textContent = '';
+      type(GIT, function(){
+        at(340, function(){ ws.classList.add('wrapped'); });
+        at(620, function(){ fillTree(next); });
+      });
+    }
+
+    function cycle(){
+      if (stopped || !running) return;
+      idx = (idx + 1) % ORDER.length;
+      var key = ORDER[idx];
+      if (key === 'status') { statusBeat(cycle); return; }
+      select(key, function(){
+        var hold = 4600;
+        runProg(key, hold);
+        at(hold, cycle);
+      });
+    }
+
+    function start(){
+      if (running || stopped) return;
+      running = true;
+      idx = 0;
+      statusBeat(cycle);
+    }
+    function pause(){ running = false; clearAll(); ws.classList.remove('fading'); }
+
+    // a reader who picks a question owns the demo from then on
+    ORDER.forEach(function(k){
+      radios[k].addEventListener('change', function(){
+        if (!running && stopped) return;
+        stopped = true; running = false;
+        settle(null);
+      });
+    });
+
+    var rm = matchMedia('(prefers-reduced-motion: reduce)');
+    function apply(){
+      pause();
+      if (rm.matches) { stopped = true; settle('status'); return; }
+      stopped = false;
+      settle('status');
+      if (!('IntersectionObserver' in window)) { start(); return; }
+    }
+    rm.addEventListener('change', apply);
+
+    // the card is taller than a phone viewport, so a ratio threshold would
+    // never fire there: plain visibility is the honest test
+    if ('IntersectionObserver' in window) {
+      new IntersectionObserver(function(es){
+        es.forEach(function(e){
+          if (rm.matches || stopped) return;
+          if (e.isIntersecting) {
+            inView = true;
+            if (!running && !document.hidden) start();
+          } else {
+            inView = false;
+            pause();
+            settle('status');
+          }
+        });
+      }, {threshold:0}).observe(ws);
+    }
+    document.addEventListener('visibilitychange', function(){
+      if (rm.matches || stopped) return;
+      if (document.hidden) { pause(); settle('status'); }
+      else if (inView) start();
+    });
+
+    apply();
+  })();
+
+  // the version in the markup is a fallback; refresh it from the releases
+  // api so cutting a tag updates the site without a redeploy. cached for an
+  // hour — well under the api's 60-per-hour limit, but short enough that a
+  // fresh release shows on its own without clearing the browser cache.
+  (function(){
+    var el = document.getElementById('version');
+    if (!el) return;
+    var KEY = 'grove-latest-release';
+    var TTL = 3600000; // 1 hour
+    try {
+      var hit = JSON.parse(localStorage.getItem(KEY) || 'null');
+      if (hit && Date.now() - hit.at < TTL && hit.tag) { el.textContent = hit.tag; return; }
+    } catch (e) { /* unparseable cache, or storage blocked — refetch */ }
+
+    try {
+      fetch('https://api.github.com/repos/aymenkrifa/grove/releases/latest')
+        .then(function(r){ return r.ok ? r.json() : Promise.reject(r.status); })
+        .then(function(d){
+          if (!d || !d.tag_name) return;
+          el.textContent = d.tag_name;
+          try { localStorage.setItem(KEY, JSON.stringify({tag: d.tag_name, at: Date.now()})); } catch (e) {}
+        })
+        .catch(function(){ /* offline, rate-limited, or no release — keep the fallback */ });
+    } catch (e) { /* no fetch at all — keep the fallback */ }
+  })();
+
+  (function(){
+    var btn = document.getElementById('copy-btn');
+    var cmd = document.getElementById('install-cmd');
+    if (!btn || !cmd) return;
+    var timer;
+    function flash(state, text){
+      clearTimeout(timer);
+      btn.dataset.state = state;
+      btn.textContent = text;
+      timer = setTimeout(function(){
+        btn.removeAttribute('data-state');
+        btn.textContent = '[copy]';
+      }, 1600);
+    }
+    // execCommand is deprecated but it is the only path that copies outside a
+    // secure context (file://, plain http), so it backs up the clipboard api
+    // rather than making the user press the keys themselves.
+    function legacyCopy(text){
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.cssText = 'position:fixed;top:0;left:-9999px;opacity:0';
+      document.body.appendChild(ta);
+      var sel = document.getSelection();
+      var prev = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+      var ok = false;
+      try {
+        ta.select();
+        ta.setSelectionRange(0, text.length); // ios needs the explicit range
+        ok = document.execCommand('copy');
+      } catch (e) { ok = false; }
+      document.body.removeChild(ta);
+      // don't clobber whatever the reader had selected
+      if (prev && sel) { sel.removeAllRanges(); sel.addRange(prev); }
+      return ok;
+    }
+
+    // last resort: put the command on screen selected, so ctrl+c works
+    function offerManual(){
+      try {
+        var r = document.createRange();
+        r.selectNodeContents(cmd);
+        var s2 = getSelection();
+        s2.removeAllRanges();
+        s2.addRange(r);
+        flash('fail', '[press ⌘/ctrl+c]');
+      } catch (e) {
+        flash('fail', '[copy failed]');
+      }
+    }
+
+    function fallback(text){
+      if (legacyCopy(text)) flash('done', '[copied]');
+      else offerManual();
+    }
+
+    btn.addEventListener('click', function(){
+      var text = cmd.textContent.trim();
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text)
+          .then(function(){ flash('done', '[copied]'); })
+          .catch(function(){ fallback(text); });
+      } else {
+        fallback(text);
+      }
+    });
+  })();
+</script>
+</body>
+</html>
