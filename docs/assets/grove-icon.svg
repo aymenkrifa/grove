@@ -1,31 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="grove">
   <rect width="256" height="256" rx="44" fill="#F6F3EA"/>
-  <g transform="translate(14.900,23.025) scale(1.3)">
-    <rect x="6.00" y="142.00" width="162.00" height="10.00" rx="5.00" fill="#6B5842"/>
-    <rect x="24.00" y="40.75" width="11.00" height="106.25" rx="5.50" fill="#6B5842"/>
-    <rect x="86.00" y="14.75" width="13.00" height="132.25" rx="6.50" fill="#6B5842"/>
-    <rect x="145.50" y="66.75" width="9.00" height="80.25" rx="4.50" fill="#6B5842"/>
-    <rect x="6.00" y="113.50" width="47.00" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="8.75" y="100.50" width="41.50" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="11.50" y="87.50" width="36.00" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="14.25" y="74.50" width="30.50" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="17.00" y="61.50" width="25.00" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="19.75" y="48.50" width="19.50" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="22.50" y="35.50" width="14.00" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="63.50" y="113.50" width="58.00" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="66.25" y="100.50" width="52.50" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="69.00" y="87.50" width="47.00" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="71.75" y="74.50" width="41.50" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="74.50" y="61.50" width="36.00" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="77.25" y="48.50" width="30.50" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="80.00" y="35.50" width="25.00" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="82.75" y="22.50" width="19.50" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="85.50" y="9.50" width="14.00" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="132.00" y="113.50" width="36.00" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="134.75" y="100.50" width="30.50" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="137.50" y="87.50" width="25.00" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="140.25" y="74.50" width="19.50" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <rect x="143.00" y="61.50" width="14.00" height="10.50" rx="3.00" fill="#3F7D35"/>
-    <circle cx="92.50" cy="79.75" r="8.0" fill="#B07908"/>
+  <g transform="translate(14.900,25.300) scale(1.3)">
+    <rect x="17.00" y="11.00" width="46.00" height="10.00" rx="5.00" fill="#6B5842"/>
+    <rect x="17.00" y="11.00" width="10.00" height="127.00" rx="5.00" fill="#6B5842"/>
+    <rect x="17.00" y="52.00" width="40.00" height="10.00" rx="5.00" fill="#6B5842"/>
+    <rect x="17.00" y="90.00" width="40.00" height="10.00" rx="5.00" fill="#6B5842"/>
+    <rect x="17.00" y="128.00" width="40.00" height="10.00" rx="5.00" fill="#6B5842"/>
+    <rect x="53.00" y="43.00" width="64.00" height="28.00" rx="14.00" fill="#3F7D35"/>
+    <circle cx="143.0" cy="57.00" r="9.5" fill="none" stroke="#3F7D35" stroke-width="9.0"/>
+    <rect x="53.00" y="81.00" width="44.00" height="28.00" rx="14.00" fill="#3F7D35"/>
+    <circle cx="143.0" cy="95.00" r="14.0" fill="#B07908"/>
+    <rect x="53.00" y="119.00" width="54.00" height="28.00" rx="14.00" fill="#3F7D35"/>
+    <circle cx="143.0" cy="133.00" r="9.5" fill="none" stroke="#3F7D35" stroke-width="9.0"/>
   </g>
 </svg>
